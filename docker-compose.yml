@@ -1,0 +1,17 @@
+services:
+  gold-bot:
+    build: .
+    container_name: gold-trading-bot
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Ho_Chi_Minh
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

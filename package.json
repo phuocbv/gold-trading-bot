@@ -1,0 +1,22 @@
+{
+  "name": "gold-trading-bot",
+  "version": "1.0.0",
+  "description": "Node.js automated analysis and trading bot for Forex Gold (XAU/USD)",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "node --watch bot.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@google/genai": "^2.20.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "node-cron": "^3.0.3",
+    "technicalindicators": "^3.1.0",
+    "yahoo-finance2": "^4.0.2"
+  }
+}
