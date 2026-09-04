@@ -2,33 +2,39 @@
  * Prompt thẩm định tín hiệu giao dịch Vàng (XAU/USD - GC=F)
  */
 function buildValidationPrompt(signal, marketSnapshot) {
+  const divergenceInfo = signal.indicators?.divergenceDetail ? `\n- Tín hiệu Phân kỳ: ${signal.indicators.divergenceDetail}` : '';
+  const candlePatternInfo = (signal.indicators?.pattern || signal.indicators?.candlePattern) ? `\n- Mô hình nến xác nhận: ${signal.indicators.pattern || signal.indicators.candlePattern}` : '';
+  const volumeInfo = signal.indicators?.volumeRatio ? `\n- Khối lượng bùng nổ: ${signal.indicators.volumeRatio}` : '';
+
   return `
 Bạn là một Giám đốc Quản trị Rủi ro và Chuyên gia Phân tích Định lượng (Senior Forex/Gold Quant Trader) hàng đầu thị trường tài chính quốc tế.
 
-Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch Vàng (Gold - GC=F) vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep) và tối đa hóa xác suất chiến thắng.
+Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch Vàng (Gold - GC=F) vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep, Fakeout) và tối đa hóa xác suất chiến thắng.
 
 THÔNG TIN TÍN HIỆU CẦN THẨM ĐỊNH:
 - Chiến lược phát hiện: ${signal.strategy}
 - Lệnh đề xuất: ${signal.action} (Giá hiện tại / Entry: $${signal.entry.toFixed(2)})
 - Stop Loss đề xuất: $${signal.stopLoss.toFixed(2)}
-- Take Profit đề xuất: $${signal.takeProfit.toFixed(2)}
-- Tỉ lệ R:R: ${signal.rrRatio}
+- Take Profit 1: $${signal.takeProfit.toFixed(2)}${signal.takeProfit2 ? ` | Take Profit 2: $${signal.takeProfit2.toFixed(2)}` : ''}
+- Tỉ lệ R:R: ${signal.rrRatio}${divergenceInfo}${candlePatternInfo}${volumeInfo}
 
 DỮ LIỆU THỊ TRƯỜNG THỰC TẾ (SNAPSHOT):
 - Khung thời gian: ${marketSnapshot.timeframe}
+- ADX(14) - Đo độ mạnh xu hướng: ${marketSnapshot.adx?.toFixed(1) || 'N/A'} (${marketSnapshot.adx >= 22 ? 'XU HƯỚNG RÕ RÀNG' : 'SIDEWAY / ĐI NGANG'})
+- Stochastic RSI (%K): ${marketSnapshot.stochK != null ? marketSnapshot.stochK.toFixed(1) : 'N/A'}
 - RSI(14): ${marketSnapshot.rsi?.toFixed(1) || 'N/A'}
-- ATR(14) - Đo độ biến động: ${marketSnapshot.atr?.toFixed(2) || 'N/A'}
-- EMA20: ${marketSnapshot.ema20?.toFixed(2) || 'N/A'}
-- EMA50: ${marketSnapshot.ema50?.toFixed(2) || 'N/A'}
-- EMA200 (Đường xu hướng dài hạn): ${marketSnapshot.ema200?.toFixed(2) || 'N/A'}
+- VWAP (Giá trị chuẩn tổ chức): ${marketSnapshot.vwap ? '$' + marketSnapshot.vwap.toFixed(2) : 'N/A'}
+- MFI(14) - Dòng tiền thực tế: ${marketSnapshot.mfi?.toFixed(1) || 'N/A'}
+- ATR(14) - Độ biến động nến: ${marketSnapshot.atr?.toFixed(2) || 'N/A'}
+- EMA Ribbon: EMA20: $${marketSnapshot.ema20?.toFixed(2) || 'N/A'} | EMA50: $${marketSnapshot.ema50?.toFixed(2) || 'N/A'} | EMA200: $${marketSnapshot.ema200?.toFixed(2) || 'N/A'}
 - Đỉnh 20 nến gần nhất: $${marketSnapshot.recentHigh?.toFixed(2) || 'N/A'}
 - Đáy 20 nến gần nhất: $${marketSnapshot.recentLow?.toFixed(2) || 'N/A'}
 - 5 cây nến gần nhất [Open, High, Low, Close]:
 ${JSON.stringify(marketSnapshot.recentCandles || [], null, 2)}
 
 HƯỚNG DẪN ĐÁNH GIÁ:
-1. Đánh giá xem lệnh có thuận xu hướng lớn (EMA200) hoặc có đủ lý do đảo chiều hợp lệ không.
-2. Kiểm tra xem điểm vào có nằm ngay sát vùng Cản/Hỗ trợ mạnh có nguy cơ bị quay đầu không.
+1. Đánh giá xem lệnh có thuận xu hướng lớn (EMA200, ADX) hoặc có tín hiệu đảo chiều tin cậy (Phân kỳ RSI, VWAP, Nến đảo chiều) không.
+2. Kiểm tra xem điểm vào có nằm ngay sát vùng Cản/Hỗ trợ mạnh có nguy cơ bị bẫy Fakeout hoặc thanh khoản (Liquidity sweep) không.
 3. Chấm điểm độ tin cậy từ 0% đến 100%. Nếu >= 75% -> approved: true, nếu < 75% -> approved: false.
 
 BẮT BUỘC TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON (không kèm markdown \`\`\`json ngoài text):

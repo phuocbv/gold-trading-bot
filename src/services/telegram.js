@@ -107,6 +107,24 @@ async function sendTradeAlert(signal) {
 
   msg += `📊 *CHỈ SỐ KỸ THUẬT:*\n`;
   if (signal.indicators.rsi != null) msg += `• RSI(14): \`${signal.indicators.rsi.toFixed(1)}\`\n`;
+  if (signal.indicators.adx != null && signal.indicators.adx > 0) {
+    msg += `• ADX(14): \`${signal.indicators.adx.toFixed(1)}\` (${signal.indicators.adx >= 22 ? 'Xu hướng mạnh' : 'Sideway'})\n`;
+  }
+  if (signal.indicators.stochRsiK != null) msg += `• StochRSI (%K): \`${signal.indicators.stochRsiK.toFixed(1)}\`\n`;
+  if (signal.indicators.vwap != null) msg += `• VWAP: \`$${signal.indicators.vwap.toFixed(2)}\`\n`;
+  if (signal.indicators.mfi != null) msg += `• MFI(14): \`${signal.indicators.mfi.toFixed(1)}\`\n`;
+  if (signal.indicators.volumeRatio && signal.indicators.volumeRatio !== 'N/A') {
+    msg += `• Đột biến Volume: \`${signal.indicators.volumeRatio}\`\n`;
+  }
+  if (signal.indicators.divergenceDetail) {
+    msg += `• Phân kỳ: _${signal.indicators.divergenceDetail}_\n`;
+  }
+  if (signal.indicators.candlePattern || signal.indicators.pattern) {
+    msg += `• Nến xác nhận: \`${signal.indicators.candlePattern || signal.indicators.pattern}\`\n`;
+  }
+  if (signal.indicators.fvgZone) {
+    msg += `• Vùng FVG: \`${signal.indicators.fvgZone}\`\n`;
+  }
   if (signal.indicators.atr != null) msg += `• ATR(14): \`${signal.indicators.atr.toFixed(2)}\`\n`;
   if (signal.indicators.ema20 != null) msg += `• EMA20: \`${signal.indicators.ema20.toFixed(2)}\`\n`;
   if (signal.indicators.ema200 != null) msg += `• EMA200: \`${signal.indicators.ema200.toFixed(2)}\`\n`;

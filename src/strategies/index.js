@@ -2,12 +2,16 @@ const TrendFollowingStrategy = require('./trendFollowing');
 const MeanReversionStrategy = require('./meanReversion');
 const BreakoutAtrStrategy = require('./breakoutAtr');
 const SmcOrderBlockStrategy = require('./smcOrderBlock');
+const RsiDivergenceStrategy = require('./rsiDivergence');
+const VolumeVwapAdxStrategy = require('./volumeVwapAdx');
 
 const strategies = [
   new TrendFollowingStrategy(),
   new MeanReversionStrategy(),
   new BreakoutAtrStrategy(),
   new SmcOrderBlockStrategy(),
+  new RsiDivergenceStrategy(),
+  new VolumeVwapAdxStrategy(),
 ];
 
 /**

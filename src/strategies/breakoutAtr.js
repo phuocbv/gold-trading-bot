@@ -2,14 +2,19 @@ const BaseStrategy = require('./baseStrategy');
 
 class BreakoutAtrStrategy extends BaseStrategy {
   constructor() {
-    super('Volatility Breakout (Donchian Range + ATR Expansion)', 'Chiến lược đánh bứt phá đỉnh/đáy kèm thanh khoản và nến bùng nổ');
+    super('Volatility Breakout (Donchian Range + Volume + ATR Expansion)', 'Chiến lược đánh bứt phá đỉnh/đáy kèm thanh khoản bùng nổ và xung lực ADX');
   }
 
   analyze(marketData) {
     if (!marketData || marketData.closes.length < 50) return null;
 
     const ind = this.calculateIndicators(marketData);
-    const { currentPrice, atr, closes, highs, lows, volumes, ema200 } = ind;
+    const { currentPrice, atr, highs, lows, ema200, adx, currentVolume, avgVolume20, vwap } = ind;
+
+    // Lọc bứt phá giả (Fakeout): Bắt buộc ADX >= 22 (thị trường có xung lực mở biên độ)
+    if (adx < 22) {
+      return null;
+    }
 
     const lookback = 20;
     if (highs.length < lookback + 1) return null;
@@ -26,28 +31,39 @@ class BreakoutAtrStrategy extends BaseStrategy {
 
     // Lọc nến bùng nổ: Biên độ nến hiện tại phải lớn hơn 1.2 lần ATR
     const isVolatileCandle = currentRange >= 1.2 * atr;
+    if (!isVolatileCandle) return null;
+
+    // Lọc khối lượng: Nếu có volume, nến phá vỡ phải có volume >= 1.2x khối lượng trung bình 20 nến
+    const isVolumeSurge = avgVolume20 > 0 ? (currentVolume >= 1.2 * avgVolume20) : true;
+    if (!isVolumeSurge) return null;
 
     let action = null;
     let stopLoss = 0;
     let takeProfit = 0;
     let takeProfit2 = 0;
 
-    // BREAKOUT BUY: Giá vượt dứt khoát đỉnh 20 nến + Nến bùng nổ + Nằm trên EMA200 (thuận xu hướng lớn)
-    if (currentPrice > highestHigh && isVolatileCandle && currentPrice > ema200) {
+    // BREAKOUT BUY: Giá vượt đỉnh 20 nến + Nến bùng nổ + Nằm trên EMA200 + (Nếu có VWAP thì trên VWAP)
+    const vwapBuyOk = vwap ? currentPrice >= vwap : true;
+    if (currentPrice > highestHigh && currentPrice > ema200 && vwapBuyOk) {
       action = 'BUY';
       stopLoss = currentLow - 0.5 * atr;
-      takeProfit = currentPrice + 2.0 * atr;
-      takeProfit2 = currentPrice + 3.5 * atr;
+      takeProfit = currentPrice + 2.2 * atr;
+      takeProfit2 = currentPrice + 4.0 * atr;
     }
-    // BREAKOUT SELL: Giá thủng dứt khoát đáy 20 nến + Nến bùng nổ + Nằm dưới EMA200
-    else if (currentPrice < lowestLow && isVolatileCandle && currentPrice < ema200) {
+    // BREAKOUT SELL: Giá thủng đáy 20 nến + Nến bùng nổ + Nằm dưới EMA200 + (Nếu có VWAP thì dưới VWAP)
+    const vwapSellOk = vwap ? currentPrice <= vwap : true;
+    if (currentPrice < lowestLow && currentPrice < ema200 && vwapSellOk) {
       action = 'SELL';
       stopLoss = currentHigh + 0.5 * atr;
-      takeProfit = currentPrice - 2.0 * atr;
-      takeProfit2 = currentPrice - 3.5 * atr;
+      takeProfit = currentPrice - 2.2 * atr;
+      takeProfit2 = currentPrice - 4.0 * atr;
     }
 
     if (!action) return null;
+
+    const risk = Math.abs(currentPrice - stopLoss);
+    const reward1 = Math.abs(takeProfit - currentPrice);
+    const reward2 = Math.abs(takeProfit2 - currentPrice);
 
     return {
       strategy: this.name,
@@ -56,17 +72,21 @@ class BreakoutAtrStrategy extends BaseStrategy {
       stopLoss,
       takeProfit,
       takeProfit2,
-      rrRatio: '1 : 2.0 / 1 : 3.5',
+      rrRatio: `1 : ${(reward1 / risk).toFixed(1)} / 1 : ${(reward2 / risk).toFixed(1)}`,
       indicators: {
         currentPrice,
         atr,
+        adx,
         highestHigh,
         lowestLow,
         candleRange: currentRange,
+        volumeRatio: avgVolume20 > 0 ? `${(currentVolume / avgVolume20).toFixed(1)}x` : 'N/A',
         ema200,
+        vwap,
       },
     };
   }
 }
 
 module.exports = BreakoutAtrStrategy;
+
