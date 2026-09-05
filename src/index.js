@@ -5,15 +5,17 @@ const { scanMarket, runMarketBriefing } = require('./botEngine');
 
 function startBot() {
   console.log('====================================================');
-  console.log('🚀 HỆ THỐNG PHÂN TÍCH VÀ GIAO DỊCH VÀNG FOREX TỰ ĐỘNG');
-  console.log(`📊 Cặp giao dịch: ${CONFIG.symbol} | Khung thời gian: ${CONFIG.timeframe}`);
+  console.log('🚀 HỆ THỐNG PHÂN TÍCH VÀ GIAO DỊCH TỰ ĐỘNG (MULTI-ASSET)');
+  console.log(`📊 Danh mục theo dõi: ${CONFIG.symbols.join(', ')} | Khung thời gian: ${CONFIG.timeframe}`);
   console.log(`⏰ Chu kỳ quét kỹ thuật: ${CONFIG.cronSchedule}`);
   console.log(`🤖 Trợ lý AI (Gemini): ${CONFIG.geminiApiKey ? `BẬT (${CONFIG.geminiModel})` : 'TẮT (Chế độ Kỹ thuật thuần)'}`);
-  console.log('📈 Chiến lược kích hoạt:');
-  console.log('   1. Trend Following (EMA Ribbon + MACD + RSI)');
-  console.log('   2. Mean Reversion (Bollinger Bands + RSI Extremes)');
-  console.log('   3. Volatility Breakout (Donchian Range + ATR Expansion)');
+  console.log('📈 6 Chiến lược kích hoạt:');
+  console.log('   1. Trend Following (EMA Ribbon + ADX + MACD + StochRSI)');
+  console.log('   2. Mean Reversion (Bollinger Bands + StochRSI + Price Action)');
+  console.log('   3. Volatility Breakout (Donchian Range + Volume + ATR Expansion)');
   console.log('   4. SMC Lite (Fair Value Gap + Order Block Retest)');
+  console.log('   5. RSI Divergence (Regular Divergence + Price Action Reversal)');
+  console.log('   6. Smart Money Flow (VWAP + ADX + MFI Volume Confirmation)');
   console.log('====================================================');
 
   // Khởi chạy Web Server giả (Dummy Server) để giữ bot sống trên nền tảng Free (Render)
@@ -21,7 +23,7 @@ function startBot() {
   const PORT = process.env.PORT || 3000;
   
   app.get('/', (req, res) => {
-    res.send('🟢 Gold Trading Bot đang hoạt động bình thường 24/7!');
+    res.send(`🟢 Trading Bot đang hoạt động 24/7! Đang theo dõi: ${CONFIG.symbols.join(', ')}`);
   });
   
   app.get('/ping', (req, res) => {

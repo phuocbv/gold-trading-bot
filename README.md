@@ -1,19 +1,26 @@
-# Gold Trading Bot (Node.js AI Co-Pilot)
+# AI Trading Co-Pilot Bot (Gold & Crypto)
 
-Hệ thống tự động phân tích thị trường Vàng (Gold Forex / XAU/USD - GC=F) theo thời gian thực kết hợp **Đa Chiến Lược Kỹ Thuật (Multi-Strategy)** và **Trợ Lý AI (Google Gemini)** thẩm định bẫy giá và phát tín hiệu chất lượng cao về Telegram.
+Hệ thống tự động phân tích thị trường **Vàng (XAU/USD)** và **Ethereum (ETH/USDT)** theo thời gian thực kết hợp **6 Chiến Lược Kỹ Thuật Chuyên Sâu (Multi-Strategy)** và **Trợ Lý AI (Google Gemini)** thẩm định bẫy giá và phát tín hiệu chất lượng cao về Telegram.
 
 ---
 
 ## 🌟 Tính Năng Nổi Bật
 
-### 1. 4 Phương Pháp Phân Tích Kỹ Thuật Chuyên Nghiệp:
-- 📈 **Trend Following (Bám Xu Hướng)**: Kết hợp EMA Ribbon (20/50/200), MACD Crossover và RSI pullback để bắt sóng thuận trend lớn.
-- 🔄 **Mean Reversion (Đảo Chiều Ngắn Hạn)**: Dùng Bollinger Bands (20, 2) + RSI quá mua/quá bán kết hợp nến rút chân/đảo chiều khi thị trường sideway.
-- 💥 **Volatility Breakout (Bùng Nổ Biên Độ)**: Phá vỡ đỉnh/đáy 20 nến (Donchian Range) kèm biên độ nến vượt 1.2x ATR.
-- 🏛 **SMC Lite (Smart Money Concepts)**: Nhận diện khoảng trống FVG (Fair Value Gap) và phản ứng khi giá retest khối lệnh Order Block.
+### 1. Hỗ Trợ Đa Tài Sản (Multi-Asset):
+- 🏆 **Vàng Forex (XAU/USD)**: Dữ liệu nến realtime Spot và Hợp đồng tương lai.
+- 💎 **Ethereum (ETH/USDT)**: Dữ liệu nến Binance Spot realtime kết hợp volume giao dịch thực tế.
+- ⚙️ Dễ dàng cấu hình mở rộng danh mục qua biến `SYMBOLS=XAU/USD,ETH/USDT` trong `.env`.
 
-### 2. Trợ Lý AI Thẩm Định (Google Gemini):
-- Đóng vai trò Senior Quant Trader: Đánh giá bẫy giá (Bull/Bear Trap, Liquidity Sweep), kiểm tra cản cứng S/R.
+### 2. 6 Phương Pháp Phân Tích Kỹ Thuật Đạt Win Rate Cao:
+- 📈 **Trend Following**: EMA Ribbon (20/50/200) + ADX (>20) + MACD + StochRSI pullback.
+- 🔄 **Mean Reversion**: Bollinger Bands + StochRSI + Nến Price Action (Hammer/Engulfing), khóa khi $ADX > 35$.
+- 💥 **Volatility Breakout**: Donchian Range 20 nến + Đột biến Volume ($>1.2\times$ TB) + $ADX \ge 22$ + VWAP.
+- 🏛 **SMC Lite**: Khoảng trống FVG (Fair Value Gap) và phản ứng khi giá retest Order Block.
+- 🎯 **RSI Divergence (Mới)**: Tự động quét Phân kỳ đỉnh/đáy Giá vs RSI kết hợp nến đảo chiều cho R:R 1:2.5 – 1:4.5.
+- 🌊 **Smart Money Flow (Mới)**: Bám sát vùng giá trị thể chế VWAP + Dòng tiền MFI + Xung lực ADX.
+
+### 3. Trợ Lý AI Thẩm Định (Google Gemini):
+- Đóng vai trò Senior Quant Trader: Phân tích bẫy giá (Bull/Bear Trap, Liquidity Sweep), kiểm tra ADX, VWAP, cản S/R.
 - Chấm điểm **Confidence Score (0-100%)**: Chỉ duyệt phát lệnh Telegram khi độ tin cậy đạt mức tối thiểu (mặc định $\ge 75\%$).
 - Tự động fallback chạy chế độ kỹ thuật thuần nếu chưa điền API Key hoặc khi mạng gián đoạn.
 - Bản tin thị trường định kỳ (AI Briefing) trước các phiên giao dịch chính (Âu 13:00, Mỹ 19:30).

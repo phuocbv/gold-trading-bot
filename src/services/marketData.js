@@ -14,29 +14,88 @@ const BINANCE_ENDPOINTS = [
 ];
 
 /**
- * Lấy dữ liệu nến Vàng giao ngay (Spot Gold XAU/USD) thời gian thực từ Binance
- * @param {string} interval - '15m', '1h', '4h', '1d'
- * @param {number} limit - Số lượng nến (mặc định 500 nến)
+ * Ánh xạ mã tài sản sang mã giao dịch trên Binance và Yahoo Finance
  */
-async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
+function resolveSymbolSources(rawSymbol = 'XAU/USD') {
+  const norm = rawSymbol.toUpperCase().replace(/[\/\-_]/g, '');
+
+  // Vàng (Gold)
+  if (norm.includes('XAU') || norm.includes('PAXG') || norm.includes('GOLD')) {
+    return {
+      rawSymbol,
+      displayName: 'Vàng (XAU/USD)',
+      binanceSymbol: 'PAXGUSDT',
+      yahooSymbol: 'GC=F',
+      isCrypto: false,
+    };
+  }
+
+  // Ethereum
+  if (norm.includes('ETH')) {
+    return {
+      rawSymbol,
+      displayName: 'Ethereum (ETH/USDT)',
+      binanceSymbol: 'ETHUSDT',
+      yahooSymbol: 'ETH-USD',
+      isCrypto: true,
+    };
+  }
+
+  // Bitcoin
+  if (norm.includes('BTC')) {
+    return {
+      rawSymbol,
+      displayName: 'Bitcoin (BTC/USDT)',
+      binanceSymbol: 'BTCUSDT',
+      yahooSymbol: 'BTC-USD',
+      isCrypto: true,
+    };
+  }
+
+  // Solana
+  if (norm.includes('SOL')) {
+    return {
+      rawSymbol,
+      displayName: 'Solana (SOL/USDT)',
+      binanceSymbol: 'SOLUSDT',
+      yahooSymbol: 'SOL-USD',
+      isCrypto: true,
+    };
+  }
+
+  // Mặc định cho các cặp khác
+  const binanceSymbol = norm.endsWith('USDT') ? norm : `${norm}USDT`;
+  return {
+    rawSymbol,
+    displayName: rawSymbol,
+    binanceSymbol,
+    yahooSymbol: `${norm.replace('USDT', '')}-USD`,
+    isCrypto: true,
+  };
+}
+
+/**
+ * Lấy dữ liệu nến thời gian thực từ Binance Spot
+ */
+async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', limit = 500) {
   let lastError = null;
 
   for (const endpoint of BINANCE_ENDPOINTS) {
     try {
       // 1. Lấy dữ liệu klines (nến)
-      const klinesUrl = `${endpoint}/api/v3/klines?symbol=PAXGUSDT&interval=${interval}&limit=${limit}`;
-      const res = await axios.get(klinesUrl, { timeout: 5000 });
+      const klinesUrl = `${endpoint}/api/v3/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
+      const res = await axios.get(klinesUrl, { timeout: 6000 });
       const rawKlines = res.data || [];
 
       // 2. Lấy giá tick trực tiếp realtime mới nhất
       let livePrice = null;
       try {
-        const tickerRes = await axios.get(`${endpoint}/api/v3/ticker/price?symbol=PAXGUSDT`, { timeout: 3000 });
+        const tickerRes = await axios.get(`${endpoint}/api/v3/ticker/price?symbol=${binanceSymbol}`, { timeout: 3000 });
         if (tickerRes.data && tickerRes.data.price) {
           livePrice = parseFloat(tickerRes.data.price);
         }
       } catch (tickerErr) {
-        // Nếu lỗi lấy ticker thì dùng giá đóng cửa nến cuối
+        // Fallback sang giá đóng cửa nến cuối
       }
 
       const closes = [];
@@ -76,18 +135,26 @@ async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
         });
       });
 
-      return { closes, highs, lows, opens, volumes, candles, isRealtime: true, source: 'Binance Spot (PAXG/USDT)' };
+      return {
+        closes,
+        highs,
+        lows,
+        opens,
+        volumes,
+        candles,
+        isRealtime: true,
+        source: `Binance Spot (${binanceSymbol})`,
+      };
     } catch (err) {
       lastError = err;
-      // Thử mirror tiếp theo
     }
   }
 
-  throw lastError || new Error('Không thể kết nối tới Binance Spot Gold API');
+  throw lastError || new Error(`Không thể kết nối tới Binance Spot API cho ${binanceSymbol}`);
 }
 
 /**
- * Lấy dữ liệu nến từ Yahoo Finance (dành cho Hợp đồng tương lai GC=F)
+ * Lấy dữ liệu nến từ Yahoo Finance
  */
 async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 14) {
   const queryOptions = {
@@ -127,8 +194,8 @@ async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 1
 }
 
 /**
- * Hàm lấy nến tổng quát hỗ trợ cả Vàng giao ngay Realtime và Hợp đồng tương lai
- * @param {string} symbol - 'XAU/USD' | 'XAUUSD' | 'PAXGUSDT' (mặc định Spot Realtime) hoặc 'GC=F' (Futures)
+ * Hàm lấy nến tổng quát hỗ trợ cả Vàng, ETH và các Crypto khác
+ * @param {string} symbol - 'XAU/USD' | 'ETH/USDT' | 'BTC/USDT', v.v.
  * @param {string} interval - '15m', '1h', v.v.
  * @param {number} daysBack - Số ngày lùi lại nếu dùng Yahoo
  */
@@ -142,28 +209,28 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
     return cached.data;
   }
 
+  const resolved = resolveSymbolSources(symbol);
+
   try {
     let data = null;
-    const isSpotGold = !symbol || symbol.includes('XAU') || symbol.includes('PAXG') || symbol === 'GOLD';
+    // Ưu tiên nạp từ Binance Spot Realtime
+    try {
+      data = await fetchBinanceKlines(resolved.binanceSymbol, interval, 500);
+    } catch (binanceErr) {
+      console.warn(`⚠️ [MarketData] Binance ${resolved.binanceSymbol} lỗi (${binanceErr.message}), thử fallback Yahoo Finance...`);
+      data = await fetchYahooCandles(resolved.yahooSymbol, interval, daysBack);
+    }
 
-    if (isSpotGold) {
-      data = await fetchBinanceSpotGold(interval, 500);
-    } else {
-      data = await fetchYahooCandles(symbol, interval, daysBack);
+    if (data) {
+      data.symbol = symbol;
+      data.displayName = resolved.displayName;
     }
 
     cache.set(cacheKey, { timestamp: now, data });
     return data;
   } catch (error) {
     console.error(`❌ [MarketData] Lỗi lấy dữ liệu ${symbol} (${interval}):`, error.message);
-    // Nếu lỗi Spot Binance, thử fallback sang Yahoo GC=F
-    try {
-      console.log('🔄 Đang thử fallback sang nguồn nến phụ...');
-      const fallback = await fetchYahooCandles('GC=F', interval, daysBack);
-      return fallback;
-    } catch (fbErr) {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -185,4 +252,6 @@ async function fetchMultiTimeframeCandles(symbol = 'XAU/USD', primaryTf = '15m',
 module.exports = {
   fetchCandles,
   fetchMultiTimeframeCandles,
+  resolveSymbolSources,
 };
+

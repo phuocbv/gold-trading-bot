@@ -5,9 +5,13 @@ if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
 
+const rawSymbols = process.env.SYMBOLS || process.env.SYMBOL || 'XAU/USD,ETH/USDT';
+const symbols = rawSymbols.split(',').map((s) => s.trim()).filter(Boolean);
+
 const CONFIG = {
-  // Cấu hình thị trường
-  symbol: process.env.SYMBOL || 'XAU/USD',
+  // Cấu hình thị trường đa tài sản
+  symbols: symbols.length > 0 ? symbols : ['XAU/USD', 'ETH/USDT'],
+  symbol: symbols[0] || 'XAU/USD',
   timeframe: process.env.TIMEFRAME || '15m',
   higherTimeframe: process.env.HIGHER_TIMEFRAME || '1h',
   cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *',

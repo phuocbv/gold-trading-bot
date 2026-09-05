@@ -84,19 +84,21 @@ function createMarketSnapshot(marketData) {
       low: c.low,
       close: c.close,
     })),
+    symbol: marketData.symbol || CONFIG.symbol,
+    displayName: marketData.displayName || marketData.symbol || CONFIG.symbol,
   };
 }
 
 /**
- * Quét thị trường, chạy các chiến lược và kiểm định bằng AI
+ * Quét một tài sản cụ thể
  */
-async function scanMarket() {
+async function scanSingleSymbol(symbol) {
   const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-  console.log(`[${timestamp}] 🔍 Đang quét thị trường Vàng (${CONFIG.symbol} - ${CONFIG.timeframe})...`);
+  console.log(`\n[${timestamp}] 🔍 Đang quét thị trường: ${symbol} (${CONFIG.timeframe})...`);
 
-  const marketData = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 14);
+  const marketData = await fetchCandles(symbol, CONFIG.timeframe, 14);
   if (!marketData || marketData.closes.length < 200) {
-    console.log('⚠️ Chưa gom đủ dữ liệu nến (cần tối thiểu 200 nến để tính EMA200).');
+    console.log(`⚠️ [${symbol}] Chưa gom đủ dữ liệu nến (cần tối thiểu 200 nến để tính EMA200).`);
     return;
   }
 
@@ -109,21 +111,23 @@ async function scanMarket() {
   const stochText = snapshot.stochK != null ? ` | StochRSI: ${snapshot.stochK.toFixed(0)}` : '';
   const vwapText = snapshot.vwap ? ` | VWAP: $${snapshot.vwap.toFixed(1)}` : '';
 
-  console.log(`💵 [GIÁ HIỆN TẠI]: $${snapshot.currentPrice.toFixed(2)} (${changeText}) | EMA20: ${snapshot.ema20.toFixed(2)} | RSI: ${snapshot.rsi.toFixed(1)}${adxText}${stochText}${vwapText} | ATR: ${snapshot.atr.toFixed(2)}`);
+  console.log(`💵 [${snapshot.displayName || symbol}]: $${snapshot.currentPrice.toFixed(2)} (${changeText}) | EMA20: ${snapshot.ema20.toFixed(2)} | RSI: ${snapshot.rsi.toFixed(1)}${adxText}${stochText}${vwapText} | ATR: ${snapshot.atr.toFixed(2)}`);
 
   // 1. Chạy tất cả các chiến lược kỹ thuật
   const candidateSignals = evaluateAllStrategies(marketData);
 
   if (candidateSignals.length === 0) {
-    console.log(`ℹ️ [Trạng thái]: Đã quét 6 chiến lược -> Chưa có tín hiệu vào lệnh.`);
+    console.log(`ℹ️ [Trạng thái - ${symbol}]: Đã quét 6 chiến lược -> Chưa có tín hiệu vào lệnh.`);
     return;
   }
 
-  console.log(`⚡ Phát hiện ${candidateSignals.length} tín hiệu kỹ thuật tiềm năng tại giá $${snapshot.currentPrice.toFixed(2)}! Bắt đầu quy trình thẩm định...`);
+  console.log(`⚡ [${symbol}] Phát hiện ${candidateSignals.length} tín hiệu tiềm năng tại giá $${snapshot.currentPrice.toFixed(2)}! Bắt đầu thẩm định...`);
 
   // 2. Thẩm định tín hiệu qua AI
   for (const signal of candidateSignals) {
-    console.log(`\n👉 Đang phân tích tín hiệu: [${signal.strategy}] - ${signal.action} tại $${signal.entry.toFixed(2)}`);
+    signal.symbol = symbol;
+    signal.displayName = snapshot.displayName || symbol;
+    console.log(`\n👉 [${symbol}] Đang phân tích tín hiệu: [${signal.strategy}] - ${signal.action} tại $${signal.entry.toFixed(2)}`);
 
     let aiReview = null;
     let shouldSend = true;
@@ -142,25 +146,48 @@ async function scanMarket() {
     if (shouldSend) {
       signal.aiReview = aiReview;
       await sendTradeAlert(signal);
-      console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: ${signal.action} $${signal.entry.toFixed(2)} qua Telegram!\n`);
+      console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: [${symbol}] ${signal.action} $${signal.entry.toFixed(2)} qua Telegram!\n`);
     }
   }
 }
 
 /**
- * Bản tin tổng hợp thị trường định kỳ
+ * Quét toàn bộ danh mục tài sản đã cấu hình
  */
-async function runMarketBriefing() {
-  console.log('\n📊 Đang tạo bản tin thị trường định kỳ bằng AI...');
-  const marketData = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 14);
-  if (!marketData || marketData.closes.length < 50) return;
+async function scanMarket(targetSymbol = null) {
+  const symbolsToScan = targetSymbol ? [targetSymbol] : (CONFIG.symbols || [CONFIG.symbol]);
+  for (const sym of symbolsToScan) {
+    try {
+      await scanSingleSymbol(sym);
+    } catch (err) {
+      console.error(`❌ [ScanMarket] Lỗi khi quét ${sym}:`, err.message);
+    }
+  }
+}
 
-  const snapshot = createMarketSnapshot(marketData);
-  const digest = await generateMarketDigest(snapshot);
+/**
+ * Bản tin tổng hợp thị trường định kỳ cho từng tài sản
+ */
+async function runMarketBriefing(targetSymbol = null) {
+  const symbolsToBrief = targetSymbol ? [targetSymbol] : (CONFIG.symbols || [CONFIG.symbol]);
+  for (const sym of symbolsToBrief) {
+    try {
+      console.log(`\n📊 Đang tạo bản tin thị trường định kỳ bằng AI cho ${sym}...`);
+      const marketData = await fetchCandles(sym, CONFIG.timeframe, 14);
+      if (!marketData || marketData.closes.length < 50) continue;
 
-  if (digest) {
-    await sendMarketDigest(digest);
-    console.log('✅ Đã gửi bản tin thị trường định kỳ qua Telegram.');
+      const snapshot = createMarketSnapshot(marketData);
+      const digest = await generateMarketDigest(snapshot);
+
+      if (digest) {
+        digest.symbol = sym;
+        digest.displayName = snapshot.displayName || sym;
+        await sendMarketDigest(digest);
+        console.log(`✅ Đã gửi bản tin thị trường định kỳ (${sym}) qua Telegram.`);
+      }
+    } catch (err) {
+      console.error(`❌ [Briefing] Lỗi khi tạo bản tin ${sym}:`, err.message);
+    }
   }
 }
 

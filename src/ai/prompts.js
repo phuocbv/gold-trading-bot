@@ -5,13 +5,15 @@ function buildValidationPrompt(signal, marketSnapshot) {
   const divergenceInfo = signal.indicators?.divergenceDetail ? `\n- Tín hiệu Phân kỳ: ${signal.indicators.divergenceDetail}` : '';
   const candlePatternInfo = (signal.indicators?.pattern || signal.indicators?.candlePattern) ? `\n- Mô hình nến xác nhận: ${signal.indicators.pattern || signal.indicators.candlePattern}` : '';
   const volumeInfo = signal.indicators?.volumeRatio ? `\n- Khối lượng bùng nổ: ${signal.indicators.volumeRatio}` : '';
+  const assetName = signal.displayName || marketSnapshot.displayName || signal.symbol || 'Tài sản';
 
   return `
-Bạn là một Giám đốc Quản trị Rủi ro và Chuyên gia Phân tích Định lượng (Senior Forex/Gold Quant Trader) hàng đầu thị trường tài chính quốc tế.
+Bạn là một Giám đốc Quản trị Rủi ro và Chuyên gia Phân tích Định lượng (Senior Quant Trader) hàng đầu thị trường tài chính quốc tế.
 
-Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch Vàng (Gold - GC=F) vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep, Fakeout) và tối đa hóa xác suất chiến thắng.
+Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch ${assetName} vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep, Fakeout) và tối đa hóa xác suất chiến thắng.
 
 THÔNG TIN TÍN HIỆU CẦN THẨM ĐỊNH:
+- Tài sản: ${assetName} (${signal.symbol || marketSnapshot.symbol})
 - Chiến lược phát hiện: ${signal.strategy}
 - Lệnh đề xuất: ${signal.action} (Giá hiện tại / Entry: $${signal.entry.toFixed(2)})
 - Stop Loss đề xuất: $${signal.stopLoss.toFixed(2)}
@@ -54,11 +56,13 @@ BẮT BUỘC TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON (không kèm markdown \`\
  * Prompt tổng hợp bản tin thị trường định kỳ
  */
 function buildDigestPrompt(marketSnapshot) {
+  const assetName = marketSnapshot.displayName || marketSnapshot.symbol || 'Tài sản';
   return `
-Bạn là chuyên gia phân tích kỹ thuật Vàng Forex (XAU/USD).
-Hãy viết một bản tin vắn tắt (Market Digest) cập nhật tình hình giá Vàng cho trader.
+Bạn là chuyên gia phân tích kỹ thuật thị trường tài chính quốc tế (${assetName}).
+Hãy viết một bản tin vắn tắt (Market Digest) cập nhật tình hình giá ${assetName} cho trader.
 
 DỮ LIỆU HIỆN TẠI:
+- Tài sản: ${assetName} (${marketSnapshot.symbol})
 - Giá: $${marketSnapshot.currentPrice?.toFixed(2)}
 - EMA20: $${marketSnapshot.ema20?.toFixed(2)} | EMA50: $${marketSnapshot.ema50?.toFixed(2)} | EMA200: $${marketSnapshot.ema200?.toFixed(2)}
 - RSI: ${marketSnapshot.rsi?.toFixed(1)} | ATR: ${marketSnapshot.atr?.toFixed(2)}

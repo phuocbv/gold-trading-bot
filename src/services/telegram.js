@@ -91,7 +91,10 @@ async function sendTradeAlert(signal) {
   const icon = isBuy ? '🟢 MUA (BUY)' : '🔴 BÁN (SELL)';
   const headerIcon = isBuy ? '🚀' : '🔻';
 
-  let msg = `${headerIcon} *TÍN HIỆU GIAO DỊCH VÀNG (${CONFIG.symbol})* ${headerIcon}\n\n`;
+  const assetName = (signal.displayName || signal.symbol || CONFIG.symbol).toUpperCase();
+  const assetIcon = assetName.includes('ETH') ? '💎' : (assetName.includes('VÀNG') || assetName.includes('XAU') ? '🏆' : '⚡');
+
+  let msg = `${headerIcon} *TÍN HIỆU GIAO DỊCH ${assetName}* ${assetIcon}\n\n`;
   msg += `📌 *Chiến Lược:* \`${signal.strategy}\`\n`;
   msg += `👉 *Hành Động:* *${icon}*\n`;
   msg += `⏱ *Khung Giờ:* \`${CONFIG.timeframe}\`\n\n`;
@@ -150,7 +153,9 @@ async function sendTradeAlert(signal) {
  * Gửi bản tin thị trường định kỳ do AI tổng hợp
  */
 async function sendMarketDigest(digest) {
-  let msg = `📋 *BẢN TIN THỊ TRƯỜNG VÀNG ĐỊNH KỲ (AI BRIEFING)* 📋\n\n`;
+  const assetName = (digest.displayName || digest.symbol || CONFIG.symbol).toUpperCase();
+  const assetIcon = assetName.includes('ETH') ? '💎' : '🏆';
+  let msg = `📋 *BẢN TIN THỊ TRƯỜNG ${assetName} (AI BRIEFING)* ${assetIcon}\n\n`;
   msg += `🕒 *Thời gian:* ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}\n`;
   msg += `💰 *Giá hiện tại:* \`$${digest.currentPrice.toFixed(2)}\`\n\n`;
   msg += `📈 *Xu hướng chính:* \`${digest.trend}\`\n`;
