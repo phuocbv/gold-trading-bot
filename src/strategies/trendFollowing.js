@@ -2,7 +2,12 @@ const BaseStrategy = require('./baseStrategy');
 
 class TrendFollowingStrategy extends BaseStrategy {
   constructor() {
-    super('Trend Following (EMA Ribbon + ADX + MACD + StochRSI)', 'Chiến lược bám theo xu hướng chủ đạo được xác nhận bởi ADX và nhịp hồi');
+    super(
+      'Trend Following (EMA Ribbon + ADX + MACD + StochRSI)',
+      'Chiến lược bám theo xu hướng chủ đạo được xác nhận bởi ADX và nhịp hồi',
+      85,
+      'TREND'
+    );
   }
 
   analyze(marketData) {
@@ -60,7 +65,7 @@ class TrendFollowingStrategy extends BaseStrategy {
     const reward1 = Math.abs(takeProfit - currentPrice);
     const reward2 = Math.abs(takeProfit2 - currentPrice);
 
-    return {
+    const signal = {
       strategy: this.name,
       action,
       entry: currentPrice,
@@ -78,6 +83,12 @@ class TrendFollowingStrategy extends BaseStrategy {
         adx,
         stochRsiK: stochRsi ? stochRsi.k : null,
       },
+    };
+
+    const scoreData = this.evaluateScore(signal, ind);
+    return {
+      ...signal,
+      ...scoreData,
     };
   }
 }

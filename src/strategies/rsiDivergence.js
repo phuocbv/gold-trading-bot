@@ -4,7 +4,9 @@ class RsiDivergenceStrategy extends BaseStrategy {
   constructor() {
     super(
       'RSI Divergence (Regular Divergence + Price Action Reversal)',
-      'Chiến lược phát hiện phân kỳ đỉnh/đáy giữa giá và RSI kết hợp nến đảo chiều cho tỷ lệ R:R cao'
+      'Chiến lược phát hiện phân kỳ đỉnh/đáy giữa giá và RSI kết hợp nến đảo chiều cho tỷ lệ R:R cao',
+      80,
+      'DIVERGENCE'
     );
   }
 
@@ -60,7 +62,7 @@ class RsiDivergenceStrategy extends BaseStrategy {
     const reward1 = Math.abs(takeProfit - currentPrice);
     const reward2 = Math.abs(takeProfit2 - currentPrice);
 
-    return {
+    const signal = {
       strategy: this.name,
       action,
       entry: currentPrice,
@@ -77,6 +79,12 @@ class RsiDivergenceStrategy extends BaseStrategy {
         candlePattern: pattern.isHammer ? 'Hammer/Pinbar' : (pattern.isBullishEngulfing ? 'Bullish Engulfing' : (pattern.isShootingStar ? 'Shooting Star' : (pattern.isBearishEngulfing ? 'Bearish Engulfing' : 'Reversal Candle'))),
         ema200,
       },
+    };
+
+    const scoreData = this.evaluateScore(signal, ind);
+    return {
+      ...signal,
+      ...scoreData,
     };
   }
 }

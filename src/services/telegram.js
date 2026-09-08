@@ -94,7 +94,15 @@ async function sendTradeAlert(signal) {
   let msg = `${headerIcon} *TÍN HIỆU GIAO DỊCH VÀNG (${CONFIG.symbol})* ${headerIcon}\n\n`;
   msg += `📌 *Chiến Lược:* \`${signal.strategy}\`\n`;
   msg += `👉 *Hành Động:* *${icon}*\n`;
-  msg += `⏱ *Khung Giờ:* \`${CONFIG.timeframe}\`\n\n`;
+  msg += `⏱ *Khung Giờ:* \`${CONFIG.timeframe}\`\n`;
+
+  if (signal.score != null) {
+    msg += `🏆 *Đánh Giá:* \`${signal.score}/100\` — *${signal.rankBadge || signal.rank}*\n`;
+    if (signal.alliedStrategies && signal.alliedStrategies.length > 1) {
+      msg += `🤝 *Hợp Lưu Đồng Thuận:* \`${signal.alliedStrategies.join(' + ')}\`\n`;
+    }
+  }
+  msg += `\n`;
 
   msg += `🎯 *THÔNG SỐ VÀO LỆNH:*\n`;
   msg += `• *Entry:* \`$${signal.entry.toFixed(2)}\`\n`;

@@ -23,7 +23,8 @@ const CONFIG = {
   aiFilterEnabled: process.env.AI_FILTER_ENABLED === 'true' || !!process.env.GEMINI_API_KEY,
   aiMinConfidence: parseInt(process.env.AI_MIN_CONFIDENCE || '75', 10),
 
-  // Cấu hình Quản lý Rủi ro mặc định
+  // Cấu hình Quản lý Rủi ro & Ngưỡng điểm chiến lược
+  minStrategyScore: parseInt(process.env.MIN_STRATEGY_SCORE || '70', 10),
   riskRewardMin: 1.5,
   atrMultiplierSl: 1.5,
   atrMultiplierTp: 3.0,

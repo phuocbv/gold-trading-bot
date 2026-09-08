@@ -2,7 +2,12 @@ const BaseStrategy = require('./baseStrategy');
 
 class MeanReversionStrategy extends BaseStrategy {
   constructor() {
-    super('Mean Reversion (Bollinger Bands + StochRSI + Price Action)', 'Chiến lược bắt đảo chiều tại biên Bollinger Bands kèm tín hiệu nến và StochRSI');
+    super(
+      'Mean Reversion (Bollinger Bands + StochRSI + Price Action)',
+      'Chiến lược bắt đảo chiều tại biên Bollinger Bands kèm tín hiệu nến và StochRSI',
+      70,
+      'REVERSION'
+    );
   }
 
   analyze(marketData) {
@@ -57,14 +62,14 @@ class MeanReversionStrategy extends BaseStrategy {
 
     if (!action) return null;
 
-    // Kiểm tra tỉ lệ R:R tối thiểu 1:1.5
+    // Kiểm tra tỉ lệ R:R tối thiểu 1:1.3
     const risk = Math.abs(currentPrice - stopLoss);
     const reward = Math.abs(takeProfit - currentPrice);
     if (risk === 0 || reward / risk < 1.3) {
       return null; // Bỏ qua nếu tỉ lệ R:R quá thấp
     }
 
-    return {
+    const signal = {
       strategy: this.name,
       action,
       entry: currentPrice,
@@ -83,6 +88,12 @@ class MeanReversionStrategy extends BaseStrategy {
         bbMiddle: bb.middle,
         pattern: pattern.isHammer ? 'Hammer/Pinbar' : (pattern.isBullishEngulfing ? 'Bullish Engulfing' : (pattern.isShootingStar ? 'Shooting Star' : (pattern.isBearishEngulfing ? 'Bearish Engulfing' : 'Reversal Candle'))),
       },
+    };
+
+    const scoreData = this.evaluateScore(signal, ind);
+    return {
+      ...signal,
+      ...scoreData,
     };
   }
 }

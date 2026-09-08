@@ -119,11 +119,22 @@ async function scanMarket() {
     return;
   }
 
-  console.log(`⚡ Phát hiện ${candidateSignals.length} tín hiệu kỹ thuật tiềm năng tại giá $${snapshot.currentPrice.toFixed(2)}! Bắt đầu quy trình thẩm định...`);
+  console.log(`⚡ Phát hiện ${candidateSignals.length} tín hiệu kỹ thuật tiềm năng tại giá $${snapshot.currentPrice.toFixed(2)}! Bắt đầu quy trình chấm điểm & thẩm định...`);
 
-  // 2. Thẩm định tín hiệu qua AI
+  // 2. Chấm điểm trọng số và Thẩm định tín hiệu qua AI
   for (const signal of candidateSignals) {
-    console.log(`\n👉 Đang phân tích tín hiệu: [${signal.strategy}] - ${signal.action} tại $${signal.entry.toFixed(2)}`);
+    const scoreText = signal.score != null ? ` | Điểm: ${signal.score}/100 (${signal.rankBadge || signal.rank})` : '';
+    console.log(`\n👉 Đang xử lý tín hiệu: [${signal.strategy}] - ${signal.action} tại $${signal.entry.toFixed(2)}${scoreText}`);
+
+    if (signal.breakdown && signal.breakdown.length > 0) {
+      console.log(`   📝 Đánh giá trọng số: ${signal.breakdown.join(' | ')}`);
+    }
+
+    // Lọc theo ngưỡng điểm tối thiểu của chiến lược
+    if (signal.score != null && signal.score < CONFIG.minStrategyScore) {
+      console.log(`✋ Tín hiệu bị loại bỏ do điểm chất lượng (${signal.score}/100) thấp hơn ngưỡng tối thiểu (${CONFIG.minStrategyScore}).`);
+      continue;
+    }
 
     let aiReview = null;
     let shouldSend = true;
@@ -135,14 +146,14 @@ async function scanMarket() {
 
       if (!aiReview.approved) {
         shouldSend = false;
-        console.log(`✋ Tín hiệu bị loại bỏ do không đạt chuẩn độ tin cậy tối thiểu (${CONFIG.aiMinConfidence}%).`);
+        console.log(`✋ Tín hiệu bị loại bỏ do không đạt chuẩn độ tin cậy AI tối thiểu (${CONFIG.aiMinConfidence}%).`);
       }
     }
 
     if (shouldSend) {
       signal.aiReview = aiReview;
       await sendTradeAlert(signal);
-      console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: ${signal.action} $${signal.entry.toFixed(2)} qua Telegram!\n`);
+      console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: ${signal.action} $${signal.entry.toFixed(2)} [Điểm: ${signal.score || 'N/A'}] qua Telegram!\n`);
     }
   }
 }

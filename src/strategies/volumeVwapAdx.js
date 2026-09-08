@@ -4,7 +4,9 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
   constructor() {
     super(
       'Smart Money Flow (VWAP + ADX + MFI Volume Confirmation)',
-      'Chiến lược bám theo dòng tiền tổ chức tại vùng giá trị VWAP kết hợp xung lực ADX và chỉ số dòng tiền MFI'
+      'Chiến lược bám theo dòng tiền tổ chức tại vùng giá trị VWAP kết hợp xung lực ADX và chỉ số dòng tiền MFI',
+      90,
+      'FLOW'
     );
   }
 
@@ -73,7 +75,7 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
     const reward1 = Math.abs(takeProfit - currentPrice);
     const reward2 = Math.abs(takeProfit2 - currentPrice);
 
-    return {
+    const signal = {
       strategy: this.name,
       action,
       entry: currentPrice,
@@ -90,6 +92,12 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
         ema50,
         volumeRatio: avgVolume20 > 0 ? `${(currentVolume / avgVolume20).toFixed(1)}x` : 'N/A',
       },
+    };
+
+    const scoreData = this.evaluateScore(signal, ind);
+    return {
+      ...signal,
+      ...scoreData,
     };
   }
 }

@@ -2,7 +2,12 @@ const BaseStrategy = require('./baseStrategy');
 
 class BreakoutAtrStrategy extends BaseStrategy {
   constructor() {
-    super('Volatility Breakout (Donchian Range + Volume + ATR Expansion)', 'Chiến lược đánh bứt phá đỉnh/đáy kèm thanh khoản bùng nổ và xung lực ADX');
+    super(
+      'Volatility Breakout (Donchian Range + Volume + ATR Expansion)',
+      'Chiến lược đánh bứt phá đỉnh/đáy kèm thanh khoản bùng nổ và xung lực ADX',
+      75,
+      'BREAKOUT'
+    );
   }
 
   analyze(marketData) {
@@ -65,7 +70,7 @@ class BreakoutAtrStrategy extends BaseStrategy {
     const reward1 = Math.abs(takeProfit - currentPrice);
     const reward2 = Math.abs(takeProfit2 - currentPrice);
 
-    return {
+    const signal = {
       strategy: this.name,
       action,
       entry: currentPrice,
@@ -84,6 +89,12 @@ class BreakoutAtrStrategy extends BaseStrategy {
         ema200,
         vwap,
       },
+    };
+
+    const scoreData = this.evaluateScore(signal, ind);
+    return {
+      ...signal,
+      ...scoreData,
     };
   }
 }

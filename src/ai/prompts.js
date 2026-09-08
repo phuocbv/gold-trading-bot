@@ -5,6 +5,9 @@ function buildValidationPrompt(signal, marketSnapshot) {
   const divergenceInfo = signal.indicators?.divergenceDetail ? `\n- Tín hiệu Phân kỳ: ${signal.indicators.divergenceDetail}` : '';
   const candlePatternInfo = (signal.indicators?.pattern || signal.indicators?.candlePattern) ? `\n- Mô hình nến xác nhận: ${signal.indicators.pattern || signal.indicators.candlePattern}` : '';
   const volumeInfo = signal.indicators?.volumeRatio ? `\n- Khối lượng bùng nổ: ${signal.indicators.volumeRatio}` : '';
+  const scoreInfo = signal.score != null ? `\n- Điểm chất lượng & Trọng số kỹ thuật: ${signal.score}/100 (${signal.rankBadge || signal.rank})` : '';
+  const breakdownInfo = signal.breakdown && signal.breakdown.length > 0 ? `\n- Chi tiết đánh giá trọng số: ${signal.breakdown.join(' | ')}` : '';
+  const confluenceInfo = signal.alliedStrategies ? `\n- Hợp lưu từ ${signal.alliedStrategies.length} chiến lược: ${signal.alliedStrategies.join(', ')}` : '';
 
   return `
 Bạn là một Giám đốc Quản trị Rủi ro và Chuyên gia Phân tích Định lượng (Senior Forex/Gold Quant Trader) hàng đầu thị trường tài chính quốc tế.
@@ -12,7 +15,7 @@ Bạn là một Giám đốc Quản trị Rủi ro và Chuyên gia Phân tích �
 Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch Vàng (Gold - GC=F) vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep, Fakeout) và tối đa hóa xác suất chiến thắng.
 
 THÔNG TIN TÍN HIỆU CẦN THẨM ĐỊNH:
-- Chiến lược phát hiện: ${signal.strategy}
+- Chiến lược phát hiện: ${signal.strategy}${scoreInfo}${breakdownInfo}${confluenceInfo}
 - Lệnh đề xuất: ${signal.action} (Giá hiện tại / Entry: $${signal.entry.toFixed(2)})
 - Stop Loss đề xuất: $${signal.stopLoss.toFixed(2)}
 - Take Profit 1: $${signal.takeProfit.toFixed(2)}${signal.takeProfit2 ? ` | Take Profit 2: $${signal.takeProfit2.toFixed(2)}` : ''}

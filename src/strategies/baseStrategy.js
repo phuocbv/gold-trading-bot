@@ -1,9 +1,11 @@
 const { EMA, RSI, ATR, MACD, BollingerBands, ADX, StochasticRSI, VWAP, MFI } = require('technicalindicators');
 
 class BaseStrategy {
-  constructor(name, description) {
+  constructor(name, description, baseWeight = 75, strategyType = 'TREND') {
     this.name = name;
     this.description = description;
+    this.baseWeight = baseWeight;
+    this.strategyType = strategyType;
   }
 
   /**
@@ -213,6 +215,101 @@ class BaseStrategy {
     }
 
     return null;
+  }
+
+  /**
+   * Tính toán điểm chất lượng và trọng số thực tế của tín hiệu dựa trên pha thị trường và các yếu tố xác nhận
+   * @param {object} signal - Tín hiệu thô do analyze() sinh ra
+   * @param {object} indicators - Kết quả từ calculateIndicators
+   * @returns {object} { score, rank, rankBadge, regimeMultiplier, breakdown }
+   */
+  evaluateScore(signal, indicators) {
+    if (!signal || !indicators) return null;
+
+    const base = this.baseWeight;
+    let multiplier = 1.0;
+    const breakdown = [`Cơ sở: ${base}đ`];
+
+    const { adx, ema200, currentPrice, currentVolume, avgVolume20 } = indicators;
+
+    // 1. Hệ số thích ứng pha thị trường (Market Regime Multiplier theo ADX)
+    if (adx >= 22) {
+      if (['TREND', 'FLOW', 'BREAKOUT', 'SMC'].includes(this.strategyType)) {
+        multiplier = 1.15;
+        breakdown.push(`Trend mạnh (ADX ${adx.toFixed(1)}): x1.15`);
+      } else if (this.strategyType === 'REVERSION') {
+        multiplier = 0.6;
+        breakdown.push(`Trend mạnh cấm cản tàu (ADX ${adx.toFixed(1)}): x0.6`);
+      }
+    } else if (adx < 20) {
+      if (['REVERSION', 'DIVERGENCE'].includes(this.strategyType)) {
+        multiplier = 1.2;
+        breakdown.push(`Sideway lý tưởng (ADX ${adx.toFixed(1)}): x1.2`);
+      } else if (['BREAKOUT', 'TREND'].includes(this.strategyType)) {
+        multiplier = 0.7;
+        breakdown.push(`Sideway giảm hiệu lực trend (ADX ${adx.toFixed(1)}): x0.7`);
+      }
+    }
+
+    let score = base * multiplier;
+
+    // 2. Điểm thưởng chất lượng Setup (Bonus Quality)
+    // Thuận xu hướng dài hạn EMA200
+    if (ema200 && currentPrice) {
+      const withEma200 = (signal.action === 'BUY' && currentPrice > ema200) ||
+                         (signal.action === 'SELL' && currentPrice < ema200);
+      if (withEma200) {
+        score += 5;
+        breakdown.push(`Thuận EMA200: +5đ`);
+      }
+    }
+
+    // Nến Price Action xác nhận
+    if (signal.indicators?.candlePattern || signal.indicators?.pattern) {
+      score += 6;
+      breakdown.push(`Mô hình nến xác nhận: +6đ`);
+    }
+
+    // Đột biến volume
+    if (avgVolume20 > 0 && currentVolume >= 1.4 * avgVolume20) {
+      score += 5;
+      breakdown.push(`Volume đột biến: +5đ`);
+    }
+
+    // Tỷ lệ R:R
+    const risk = Math.abs(signal.entry - signal.stopLoss);
+    const reward = Math.abs(signal.takeProfit - signal.entry);
+    if (risk > 0) {
+      const rr = reward / risk;
+      if (rr >= 2.5) {
+        score += 6;
+        breakdown.push(`Tỷ lệ R:R cao (${rr.toFixed(1)}): +6đ`);
+      } else if (rr >= 1.8) {
+        score += 3;
+        breakdown.push(`Tỷ lệ R:R tốt (${rr.toFixed(1)}): +3đ`);
+      }
+    }
+
+    // Giới hạn điểm từ 0 đến 100
+    score = Math.min(100, Math.max(0, Math.round(score)));
+
+    let rank = 'B';
+    let rankBadge = '⭐⭐⭐ [Hạng B - Đạt chuẩn]';
+    if (score >= 90) {
+      rank = 'S';
+      rankBadge = '⭐⭐⭐⭐⭐ [Hạng S - Rất mạnh]';
+    } else if (score >= 80) {
+      rank = 'A';
+      rankBadge = '⭐⭐⭐⭐ [Hạng A - Uy tín cao]';
+    }
+
+    return {
+      score,
+      rank,
+      rankBadge,
+      regimeMultiplier: multiplier,
+      breakdown,
+    };
   }
 
   /**

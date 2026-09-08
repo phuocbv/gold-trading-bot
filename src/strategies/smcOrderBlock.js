@@ -2,7 +2,12 @@ const BaseStrategy = require('./baseStrategy');
 
 class SmcOrderBlockStrategy extends BaseStrategy {
   constructor() {
-    super('SMC Lite (Fair Value Gap + Order Block Retest)', 'Chiến lược Smart Money Concepts phát hiện khoảng trống FVG và khối lệnh OB');
+    super(
+      'SMC Lite (Fair Value Gap + Order Block Retest)',
+      'Chiến lược Smart Money Concepts phát hiện khoảng trống FVG và khối lệnh OB',
+      85,
+      'SMC'
+    );
   }
 
   analyze(marketData) {
@@ -77,14 +82,14 @@ class SmcOrderBlockStrategy extends BaseStrategy {
 
     if (!action) return null;
 
-    return {
+    const signal = {
       strategy: this.name,
       action,
       entry: currentPrice,
       stopLoss,
       takeProfit,
       takeProfit2,
-      rrRatio: '1 : 2.5 / 1 : 4.0',
+      rrRatio: '1 : 2.5 (TP1) / 1 : 4.0 (TP2)',
       indicators: {
         currentPrice,
         atr,
@@ -93,6 +98,12 @@ class SmcOrderBlockStrategy extends BaseStrategy {
           ? `$${activeBullishFvg.bottom.toFixed(2)} - $${activeBullishFvg.top.toFixed(2)}`
           : `$${activeBearishFvg.bottom.toFixed(2)} - $${activeBearishFvg.top.toFixed(2)}`,
       },
+    };
+
+    const scoreData = this.evaluateScore(signal, ind);
+    return {
+      ...signal,
+      ...scoreData,
     };
   }
 }
