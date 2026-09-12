@@ -5,8 +5,16 @@ const yahooFinance = new YahooFinance();
 // Bộ nhớ cache tạm thời trong cùng một chu kỳ quét
 const cache = new Map();
 
-// Danh sách mirror endpoints của Binance để đảm bảo độ sẵn sàng 100%
+// Headers giả lập trình duyệt để tránh bị WAF/Cloudflare của Binance chặn (lỗi 418)
+const HTTP_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
+// Danh sách mirror endpoints của Binance (ưu tiên data-api.binance.vision chuyên dụng cho public data)
 const BINANCE_ENDPOINTS = [
+  'https://data-api.binance.vision',
   'https://api.binance.com',
   'https://api1.binance.com',
   'https://api2.binance.com',
@@ -25,13 +33,23 @@ async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
     try {
       // 1. Lấy dữ liệu klines (nến)
       const klinesUrl = `${endpoint}/api/v3/klines?symbol=PAXGUSDT&interval=${interval}&limit=${limit}`;
-      const res = await axios.get(klinesUrl, { timeout: 5000 });
+      const res = await axios.get(klinesUrl, { 
+        headers: HTTP_HEADERS,
+        timeout: 6000 
+      });
       const rawKlines = res.data || [];
+
+      if (!Array.isArray(rawKlines) || rawKlines.length === 0) {
+        throw new Error('Dữ liệu nến rỗng từ Binance');
+      }
 
       // 2. Lấy giá tick trực tiếp realtime mới nhất
       let livePrice = null;
       try {
-        const tickerRes = await axios.get(`${endpoint}/api/v3/ticker/price?symbol=PAXGUSDT`, { timeout: 3000 });
+        const tickerRes = await axios.get(`${endpoint}/api/v3/ticker/price?symbol=PAXGUSDT`, { 
+          headers: HTTP_HEADERS,
+          timeout: 3000 
+        });
         if (tickerRes.data && tickerRes.data.price) {
           livePrice = parseFloat(tickerRes.data.price);
         }
@@ -79,11 +97,63 @@ async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
       return { closes, highs, lows, opens, volumes, candles, isRealtime: true, source: 'Binance Spot (PAXG/USDT)' };
     } catch (err) {
       lastError = err;
-      // Thử mirror tiếp theo
+      // Nếu gặp lỗi 418 hoặc 429 (IP bị ban/rate limit), không gọi dồn dập các endpoint Binance khác
+      if (err.response && (err.response.status === 418 || err.response.status === 429)) {
+        break;
+      }
     }
   }
 
   throw lastError || new Error('Không thể kết nối tới Binance Spot Gold API');
+}
+
+/**
+ * Lấy dữ liệu nến Vàng giao ngay từ sàn Gate.io (Dự phòng 24/7 khi Binance bị 418/chặn IP)
+ */
+async function fetchGateIoSpotGold(interval = '15m', limit = 500) {
+  const url = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=PAXG_USDT&interval=${interval}&limit=${limit}`;
+  const res = await axios.get(url, {
+    headers: HTTP_HEADERS,
+    timeout: 6000,
+  });
+
+  const raw = res.data || [];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('Dữ liệu nến rỗng từ Gate.io');
+  }
+
+  const closes = [];
+  const highs = [];
+  const lows = [];
+  const opens = [];
+  const volumes = [];
+  const candles = [];
+
+  raw.forEach((c) => {
+    // Format Gate.io: [timestamp_sec, quote_volume, close, high, low, open, base_volume]
+    const timestamp = parseInt(c[0], 10) * 1000;
+    const close = parseFloat(c[2]);
+    const high = parseFloat(c[3]);
+    const low = parseFloat(c[4]);
+    const open = parseFloat(c[5]);
+    const volume = parseFloat(c[6]);
+
+    closes.push(close);
+    highs.push(high);
+    lows.push(low);
+    opens.push(open);
+    volumes.push(volume);
+    candles.push({
+      date: new Date(timestamp),
+      open,
+      high,
+      low,
+      close,
+      volume,
+    });
+  });
+
+  return { closes, highs, lows, opens, volumes, candles, isRealtime: true, source: 'Gate.io Spot (PAXG/USDT)' };
 }
 
 /**
@@ -127,7 +197,7 @@ async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 1
 }
 
 /**
- * Hàm lấy nến tổng quát hỗ trợ cả Vàng giao ngay Realtime và Hợp đồng tương lai
+ * Hàm lấy nến tổng quát đa nguồn hỗ trợ tự động Fallback (Binance -> Gate.io -> Yahoo)
  * @param {string} symbol - 'XAU/USD' | 'XAUUSD' | 'PAXGUSDT' (mặc định Spot Realtime) hoặc 'GC=F' (Futures)
  * @param {string} interval - '15m', '1h', v.v.
  * @param {number} daysBack - Số ngày lùi lại nếu dùng Yahoo
@@ -137,33 +207,47 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
   const now = Date.now();
   const cached = cache.get(cacheKey);
 
-  // Cache trong 15 giây để tránh spam gọi API trong cùng 1 chu kỳ
-  if (cached && (now - cached.timestamp < 15 * 1000)) {
+  // Cache trong 20 giây để tránh spam gọi API trong cùng 1 chu kỳ quét
+  if (cached && (now - cached.timestamp < 20 * 1000)) {
     return cached.data;
   }
 
-  try {
-    let data = null;
-    const isSpotGold = !symbol || symbol.includes('XAU') || symbol.includes('PAXG') || symbol === 'GOLD';
+  const isSpotGold = !symbol || symbol.includes('XAU') || symbol.includes('PAXG') || symbol === 'GOLD';
 
-    if (isSpotGold) {
-      data = await fetchBinanceSpotGold(interval, 500);
-    } else {
-      data = await fetchYahooCandles(symbol, interval, daysBack);
-    }
-
-    cache.set(cacheKey, { timestamp: now, data });
-    return data;
-  } catch (error) {
-    console.error(`❌ [MarketData] Lỗi lấy dữ liệu ${symbol} (${interval}):`, error.message);
-    // Nếu lỗi Spot Binance, thử fallback sang Yahoo GC=F
+  // 1. Nếu là Spot Gold: Ưu tiên Binance Spot
+  if (isSpotGold) {
     try {
-      console.log('🔄 Đang thử fallback sang nguồn nến phụ...');
-      const fallback = await fetchYahooCandles('GC=F', interval, daysBack);
-      return fallback;
-    } catch (fbErr) {
-      return null;
+      const data = await fetchBinanceSpotGold(interval, 500);
+      cache.set(cacheKey, { timestamp: now, data });
+      return data;
+    } catch (binanceErr) {
+      const isRateLimit = binanceErr.response && (binanceErr.response.status === 418 || binanceErr.response.status === 429);
+      if (isRateLimit) {
+        console.warn(`⚠️ [MarketData] Binance hạn chế IP (${binanceErr.response.status} Rate Limit). Đang chuyển sang sàn Spot dự phòng...`);
+      } else {
+        console.warn(`⚠️ [MarketData] Lỗi kết nối Binance (${binanceErr.message}). Đang chuyển sang sàn Spot dự phòng...`);
+      }
+
+      // 2. Fallback sang Gate.io Spot Gold (PAXG/USDT - 24/7)
+      try {
+        const gateData = await fetchGateIoSpotGold(interval, 500);
+        cache.set(cacheKey, { timestamp: now, data: gateData });
+        return gateData;
+      } catch (gateErr) {
+        console.warn(`⚠️ [MarketData] Gate.io không khả dụng (${gateErr.message}). Chuyển sang Yahoo Finance...`);
+      }
     }
+  }
+
+  // 3. Fallback sang Yahoo Finance (GC=F)
+  try {
+    const yahooSymbol = isSpotGold ? 'GC=F' : symbol;
+    const yahooData = await fetchYahooCandles(yahooSymbol, interval, daysBack);
+    cache.set(cacheKey, { timestamp: now, data: yahooData });
+    return yahooData;
+  } catch (yahooErr) {
+    console.error(`❌ [MarketData] Tất cả các nguồn dữ liệu cho ${symbol} (${interval}) đều thất bại:`, yahooErr.message);
+    return null;
   }
 }
 
