@@ -15,6 +15,7 @@ Hệ thống tự động phân tích thị trường Vàng (Gold Forex / XAU/US
 ### 2. Trợ Lý AI Thẩm Định (Google Gemini):
 - Đóng vai trò Senior Quant Trader: Đánh giá bẫy giá (Bull/Bear Trap, Liquidity Sweep), kiểm tra cản cứng S/R.
 - Chấm điểm **Confidence Score (0-100%)**: Chỉ duyệt phát lệnh Telegram khi độ tin cậy đạt mức tối thiểu (mặc định $\ge 75\%$).
+- **Cơ chế Multi-Key Pool**: Hỗ trợ nhiều API Key đồng thời, tự động xoay tua (Round-Robin) chia tải và tự động chuyển key (Instant Failover + Cooldown 60s) khi chạm Rate Limit 429 hoặc hết quota Free Tier.
 - Tự động fallback chạy chế độ kỹ thuật thuần nếu chưa điền API Key hoặc khi mạng gián đoạn.
 - Bản tin thị trường định kỳ (AI Briefing) trước các phiên giao dịch chính (Âu 13:00, Mỹ 19:30).
 
@@ -69,9 +70,10 @@ SYMBOL=XAU/USD
 TIMEFRAME=15m
 CRON_SCHEDULE=*/5 * * * *
 
-# Trợ lý AI (Google Gemini)
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.7-flash
+# Trợ lý AI (Google Gemini - Hỗ trợ 1 hoặc nhiều key phân tách bởi dấu phẩy)
+GEMINI_API_KEYS=gemini_key_1,gemini_key_2,gemini_key_3
+GEMINI_MODEL=gemini-3.8-flash
+AI_MIN_CONFIDENCE=75
 ```
 
 ---

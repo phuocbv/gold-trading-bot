@@ -141,7 +141,8 @@ async function scanMarket() {
 
     if (CONFIG.aiFilterEnabled) {
       aiReview = await validateTradeSignal(signal, snapshot);
-      console.log(`🤖 Kết quả AI [${aiReview.mode}]: Điểm tin cậy: ${aiReview.confidence}% | Duyệt: ${aiReview.approved ? '✅ ĐỒNG THUẬN' : '❌ TỪ CHỐI'}`);
+      const keyInfo = aiReview.keyUsed ? ` (${aiReview.keyUsed} | ${aiReview.modelUsed})` : '';
+      console.log(`🤖 Kết quả AI [${aiReview.mode}${keyInfo}]: Điểm tin cậy: ${aiReview.confidence}% | Duyệt: ${aiReview.approved ? '✅ ĐỒNG THUẬN' : '❌ TỪ CHỐI'}`);
       console.log(`💬 Lý do AI: ${aiReview.reasoning}`);
 
       if (!aiReview.approved) {

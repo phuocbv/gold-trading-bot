@@ -5,6 +5,16 @@ if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
 
+function parseGeminiKeys() {
+  const raw = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
+  return raw
+    .split(/[,\n]/)
+    .map((k) => k.trim())
+    .filter((k) => k && !k.includes('YOUR_GEMINI'));
+}
+
+const geminiApiKeys = parseGeminiKeys();
+
 const CONFIG = {
   // Cấu hình thị trường
   symbol: process.env.SYMBOL || 'XAU/USD',
@@ -18,9 +28,10 @@ const CONFIG = {
   telegramApiBase: process.env.TELEGRAM_API_BASE || 'https://api.telegram.org',
 
   // Cấu hình AI (Gemini)
-  geminiApiKey: process.env.GEMINI_API_KEY,
+  geminiApiKeys,
+  geminiApiKey: geminiApiKeys[0] || null,
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
-  aiFilterEnabled: process.env.AI_FILTER_ENABLED === 'true' || !!process.env.GEMINI_API_KEY,
+  aiFilterEnabled: process.env.AI_FILTER_ENABLED === 'true' || geminiApiKeys.length > 0,
   aiMinConfidence: parseInt(process.env.AI_MIN_CONFIDENCE || '75', 10),
 
   // Cấu hình Quản lý Rủi ro & Ngưỡng điểm chiến lược

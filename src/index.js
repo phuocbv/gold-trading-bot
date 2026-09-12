@@ -7,8 +7,11 @@ function startBot() {
   console.log('====================================================');
   console.log('🚀 HỆ THỐNG PHÂN TÍCH VÀ GIAO DỊCH VÀNG FOREX TỰ ĐỘNG');
   console.log(`📊 Cặp giao dịch: ${CONFIG.symbol} | Khung thời gian: ${CONFIG.timeframe}`);
-  console.log(`⏰ Chu kỳ quét kỹ thuật: ${CONFIG.cronSchedule}`);
-  console.log(`🤖 Trợ lý AI (Gemini): ${CONFIG.geminiApiKey ? `BẬT (${CONFIG.geminiModel})` : 'TẮT (Chế độ Kỹ thuật thuần)'}`);
+  const keyCount = CONFIG.geminiApiKeys ? CONFIG.geminiApiKeys.length : (CONFIG.geminiApiKey ? 1 : 0);
+  const aiStatus = keyCount > 0 
+    ? `BẬT (${keyCount} API Key trong pool | Model: ${CONFIG.geminiModel})` 
+    : 'TẮT (Chế độ Kỹ thuật thuần)';
+  console.log(`🤖 Trợ lý AI (Gemini): ${aiStatus}`);
   console.log('📈 Chiến lược kích hoạt:');
   console.log('   1. Trend Following (EMA Ribbon + MACD + RSI)');
   console.log('   2. Mean Reversion (Bollinger Bands + RSI Extremes)');
