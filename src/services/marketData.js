@@ -266,7 +266,47 @@ async function fetchMultiTimeframeCandles(symbol = 'XAU/USD', primaryTf = '15m',
   };
 }
 
+/**
+ * Lấy giá thị trường hiện tại tức thì (Realtime Ticker Price) với độ trễ thấp (<300ms)
+ * Ưu tiên Binance Spot -> Fallback Gate.io Spot
+ * @param {string} symbol
+ * @returns {Promise<number|null>}
+ */
+async function fetchLivePrice(symbol = 'XAU/USD') {
+  // 1. Thử Binance
+  for (const endpoint of BINANCE_ENDPOINTS) {
+    try {
+      const res = await axios.get(`${endpoint}/api/v3/ticker/price?symbol=PAXGUSDT`, {
+        headers: HTTP_HEADERS,
+        timeout: 3000,
+      });
+      if (res.data && res.data.price) {
+        return parseFloat(res.data.price);
+      }
+    } catch (err) {
+      if (err.response && (err.response.status === 418 || err.response.status === 429)) {
+        break;
+      }
+    }
+  }
+
+  // 2. Fallback sang Gate.io Spot
+  try {
+    const gateRes = await axios.get('https://api.gateio.ws/api/v4/spot/tickers?currency_pair=PAXG_USDT', {
+      headers: HTTP_HEADERS,
+      timeout: 3000,
+    });
+    if (Array.isArray(gateRes.data) && gateRes.data.length > 0 && gateRes.data[0].last) {
+      return parseFloat(gateRes.data[0].last);
+    }
+  } catch (gateErr) {}
+
+  return null;
+}
+
 module.exports = {
   fetchCandles,
   fetchMultiTimeframeCandles,
+  fetchLivePrice,
 };
+

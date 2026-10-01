@@ -39,6 +39,20 @@ const CONFIG = {
   riskRewardMin: 1.5,
   atrMultiplierSl: 1.5,
   atrMultiplierTp: 3.0,
+
+  // Cấu hình Bot Scalping 1 Phút (1 Giá)
+  scalp: {
+    symbol: process.env.SCALP_SYMBOL || process.env.SYMBOL || 'XAU/USD',
+    timeframe: '1m',
+    cronSchedule: process.env.SCALP_CRON_SCHEDULE || '* * * * *',
+    takeProfit: parseFloat(process.env.SCALP_TAKE_PROFIT || '1.0'), // Cứ 1 giá là đóng lệnh
+    stopLoss: parseFloat(process.env.SCALP_STOP_LOSS || '1.5'), // Cắt lỗ theo người dùng cấu hình
+    lotSize: parseFloat(process.env.EXNESS_LOT_SIZE || '0.01'), // Khối lượng lot giao dịch
+    checkIntervalSec: parseInt(process.env.SCALP_CHECK_INTERVAL_SEC || '3', 10),
+    minScore: parseInt(process.env.SCALP_MIN_SCORE || '70', 10),
+    aiFilterEnabled: process.env.SCALP_AI_FILTER === 'true',
+    port: parseInt(process.env.SCALP_PORT || '3001', 10),
+  },
 };
 
 module.exports = CONFIG;

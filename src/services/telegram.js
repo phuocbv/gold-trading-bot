@@ -169,8 +169,97 @@ async function sendMarketDigest(digest) {
   return await sendRawMessage(msg);
 }
 
+/**
+ * Gửi thông báo mở vị thế Scalping 1 Phút (Mục tiêu 1 giá)
+ */
+async function sendScalpOpenAlert(position) {
+  const isBuy = position.action.toUpperCase() === 'BUY';
+  const icon = isBuy ? '🟢 MUA (BUY)' : '🔴 BÁN (SELL)';
+  const headerIcon = isBuy ? '🚀' : '🔻';
+
+  let msg = `${headerIcon} *[SCALP 1M] MỞ VỊ THẾ GIAO DỊCH* ${headerIcon}\n\n`;
+  msg += `👉 *Hành Động:* *${icon}*\n`;
+  msg += `📌 *Chiến Lược:* \`${position.setupType || position.strategy}\`\n`;
+  msg += `⏱ *Khung Giờ:* \`1 Phút (1m)\`\n`;
+  if (position.score != null) {
+    msg += `🏆 *Đánh Giá:* \`${position.score}/100\` — *${position.rankBadge || position.rank}*\n`;
+  }
+  msg += `\n`;
+
+  msg += `🎯 *THÔNG SỐ VỊ THẾ:*\n`;
+  msg += `• *Giá Vào (Entry):* \`$${position.entryPrice.toFixed(2)}\`\n`;
+  msg += `• *Chốt Lời (TP):* \`$${position.takeProfit.toFixed(2)}\` (🎯 Đúng +${position.takeProfitPoints.toFixed(2)} giá)\n`;
+  msg += `• *Cắt Lỗ (SL):* \`$${position.stopLoss.toFixed(2)}\` (🛡 -${position.stopLossPoints.toFixed(2)} giá cấu hình)\n\n`;
+
+  if (position.indicators) {
+    msg += `📊 *TÍN HIỆU VI MÔ (1M):*\n`;
+    if (position.indicators.ema9 && position.indicators.ema21) {
+      msg += `• EMA 9/21: \`$${position.indicators.ema9.toFixed(2)} / $${position.indicators.ema21.toFixed(2)}\`\n`;
+    }
+    if (position.indicators.rsi != null) {
+      msg += `• RSI(14): \`${position.indicators.rsi.toFixed(1)}\`\n`;
+    }
+    if (position.indicators.stochK != null) {
+      msg += `• StochRSI: \`${position.indicators.stochK.toFixed(0)}\`\n`;
+    }
+    if (position.indicators.pattern) {
+      msg += `• Nến: \`${position.indicators.pattern}\`\n`;
+    }
+    if (position.indicators.atr != null) {
+      msg += `• ATR(14): \`${position.indicators.atr.toFixed(2)}\`\n`;
+    }
+  }
+
+  msg += `\n💡 _Bot đang giám sát giá Realtime từng giây. Khi đạt đúng +1 giá là lập tức đóng lệnh chốt lời!_`;
+
+  return await sendRawMessage(msg);
+}
+
+/**
+ * Gửi thông báo đóng lệnh Scalping (Chốt lời 1 giá hoặc Cắt lỗ)
+ */
+async function sendScalpCloseAlert(result) {
+  const { type, trade, stats } = result;
+  const isTp = type === 'TP';
+  const isBuy = trade.action.toUpperCase() === 'BUY';
+  const icon = isBuy ? '🟢 MUA (BUY)' : '🔴 BÁN (SELL)';
+
+  let msg = '';
+  if (isTp) {
+    msg += `🎉 *[SCALP 1M] CHỐT LỜI THÀNH CÔNG (+1.00 GIÁ)!* 🎉\n\n`;
+    msg += `👉 *Vị Thế:* *${icon}*\n`;
+    msg += `🎯 *Mục Tiêu:* Đã cán đích chốt lời 1 giá thành công!\n\n`;
+  } else {
+    msg += `🛑 *[SCALP 1M] ĐÃ ĐÓNG LỆNH CẮT LỖ (SL HIT)* 🛑\n\n`;
+    msg += `👉 *Vị Thế:* *${icon}*\n`;
+    msg += `🛡 *Lý Do:* Giá chạm mức cắt lỗ an toàn theo người dùng.\n\n`;
+  }
+
+  msg += `💵 *CHI TIẾT KHỚP LỆNH:*\n`;
+  msg += `• *Giá Vào:* \`$${trade.entryPrice.toFixed(2)}\`\n`;
+  msg += `• *Giá Đóng:* \`$${trade.exitPrice.toFixed(2)}\`\n`;
+  const pnlSign = trade.pnlPoints >= 0 ? `+${trade.pnlPoints.toFixed(2)}` : `${trade.pnlPoints.toFixed(2)}`;
+  msg += `• *Kết Quả:* *${trade.result === 'WIN' ? '💰 LÃI' : '🔻 LỖ'} ${pnlSign} giá*\n`;
+  msg += `• *Thời Gian Giữ:* \`${trade.durationFormatted || 'N/A'}\`\n\n`;
+
+  if (stats) {
+    msg += `📈 *HIỆU SUẤT SCALPING HÔM NAY:*\n`;
+    msg += `• *Tổng Số Lệnh:* \`${stats.totalTrades}\` (Thắng: \`${stats.wins}\` | Thua: \`${stats.losses}\`)\n`;
+    msg += `• 🏆 *Tỷ Lệ Thắng (Winrate):* \`${stats.winRate}%\`\n`;
+    const totalPnlSign = stats.totalPointsEarned >= 0 ? `+${stats.totalPointsEarned.toFixed(2)}` : `${stats.totalPointsEarned.toFixed(2)}`;
+    msg += `• 💰 *Tổng PnL Tích Luỹ:* \`${totalPnlSign} giá\`\n`;
+  }
+
+  msg += `\n🚀 _Tiếp tục quét nến 1m tiếp theo để tìm cơ hội mới..._`;
+
+  return await sendRawMessage(msg);
+}
+
 module.exports = {
   sendRawMessage,
   sendTradeAlert,
   sendMarketDigest,
+  sendScalpOpenAlert,
+  sendScalpCloseAlert,
 };
+

@@ -19,6 +19,13 @@ Hệ thống tự động phân tích thị trường Vàng (Gold Forex / XAU/US
 - Tự động fallback chạy chế độ kỹ thuật thuần nếu chưa điền API Key hoặc khi mạng gián đoạn.
 - Bản tin thị trường định kỳ (AI Briefing) trước các phiên giao dịch chính (Âu 13:00, Mỹ 19:30).
 
+### 3. Bot Scalping 1 Phút (1-Minute One-Price Scalper - `feat/add-trade-one-price`):
+- ⚡ **Phân tích theo từng phút (Khung 1m)**: Kết hợp EMA Ribbon ngắn hạn (EMA 9/21/50), RSI(14), Stochastic RSI và mô hình nến Price Action vi mô.
+- 🎯 **Quy tắc Chốt Lời Cố Định 1 Giá (+1.00 USD)**: "Cứ được 1 giá là đóng lệnh". Ngay khi giá chạy đúng 1 giá theo chiều lệnh, bot tự động kích hoạt đóng lệnh chốt lời.
+- 🛡 **Mức Cắt Lỗ (Stop Loss) Tùy Chỉnh**: Người dùng dễ dàng cài đặt mức cắt lỗ mong muốn trong `.env` (`SCALP_STOP_LOSS=1.5` hoặc 1.0, 2.0 giá).
+- 🕒 **Giám Sát Giá Realtime Từng Giây**: Vòng lặp kiểm tra giá tick trực tiếp (<300ms) liên tục, lập tức phát hiện thời điểm chạm TP/SL để đóng lệnh và gửi báo cáo Telegram.
+- 📊 **Quản Lý Vị Thế & Nhật Ký Giao Dịch (Position Tracker)**: Tự động lưu trạng thái bền vững (State Persistence), ngăn ngừa nhồi lệnh rủi ro, theo dõi Win Rate và tổng PnL tích lũy.
+
 ---
 
 ## 📁 Cấu Trúc Dự Án
@@ -28,14 +35,19 @@ gold-trading-bot/
 ├── .env                     # File cấu hình biến môi trường
 ├── .env.example             # Mẫu biến môi trường
 ├── package.json             # Khai báo dependency
-├── bot.js                   # Entrypoint chính
+├── bot.js                   # Entrypoint chính (Bot Swing/Daytrade)
+├── bot-scalp.js             # Entrypoint riêng cho Bot Scalping 1 Phút (1 Giá)
 └── src/
-    ├── index.js             # Scheduler & khởi chạy bot
+    ├── index.js             # Scheduler & khởi chạy bot chính
     ├── config.js            # Quản lý cấu hình tập trung
     ├── botEngine.js         # Điều phối quét nến, chạy chiến lược & AI
+    ├── scalper/
+    │   ├── scalpStrategy.js # Chiến lược vi mô 1m (Micro-Momentum, BB, StochRSI)
+    │   ├── positionTracker.js # Quản lý vị thế, kiểm tra TP +1 giá / SL, ghi nhật ký
+    │   └── scalpEngine.js   # Điều phối quét nến 1m & giám sát tick realtime
     ├── services/
-    │   ├── marketData.js    # Tải dữ liệu nến từ Yahoo Finance v4
-    │   └── telegram.js      # Định dạng và gửi thông báo Telegram giàu Markdown
+    │   ├── marketData.js    # Tải nến & giá tick realtime từ Binance / Gate.io
+    │   └── telegram.js      # Gửi thông báo Telegram (Swing + Scalp Alert)
     ├── strategies/
     │   ├── baseStrategy.js  # Lớp cơ sở tính toán chỉ báo kỹ thuật
     │   ├── trendFollowing.js# Chiến lược Trend Ribbon (EMA + MACD + RSI)
@@ -65,16 +77,72 @@ Tạo file `.env` (hoặc sao chép từ `.env.example`):
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
 
-# Thị trường
-SYMBOL=XAU/USD
-TIMEFRAME=15m
-CRON_SCHEDULE=*/5 * * * *
-
-# Trợ lý AI (Google Gemini - Hỗ trợ 1 hoặc nhiều key phân tách bởi dấu phẩy)
-GEMINI_API_KEYS=gemini_key_1,gemini_key_2,gemini_key_3
-GEMINI_MODEL=gemini-3.8-flash
-AI_MIN_CONFIDENCE=75
+# Cấu hình Bot Scalping 1 Phút (Chốt lời 1 giá - Cắt lỗ tùy chỉnh)
+SCALP_TAKE_PROFIT=1.0
+SCALP_STOP_LOSS=1.5
+SCALP_CHECK_INTERVAL_SEC=3
+SCALP_MIN_SCORE=70
+SCALP_PORT=3001
 ```
+
+### 3. Khởi chạy Bot:
+- **Chạy Bot Scalping 1 Phút (Chốt lời 1 giá):**
+```bash
+pnpm run scalp
+# hoặc: node bot-scalp.js
+```
+
+- **Chạy Bot Phân Tích Swing / Daytrade chính (Khung 15m/1h):**
+```bash
+pnpm start
+# hoặc: node bot.js
+```
+
+- **Chạy song song cả 2 Bot trên cùng 1 máy bằng PM2:**
+```bash
+pm2 start ecosystem.config.js
+```
+
+---
+
+## 🔌 Hướng Dẫn Kết Nối Tài Khoản Exness MT5 Auto Trade (2 Giải Pháp)
+
+> 📖 **Xem tài liệu chi tiết đầy đủ tại:** [docs/EXNESS_MT5_INTEGRATION.md](docs/EXNESS_MT5_INTEGRATION.md)
+
+### 🌟 Giải Pháp 1: Kết Nối Qua MetaApi Cloud (Treo Bot 24/7 Không Cần Mở Máy Tính)
+Dành cho bạn muốn chạy bot trên VPS hoặc tắt máy tính mà bot vẫn tự động đánh vào tài khoản Demo/Real Exness (nhìn lệnh nhảy trên app MT5 điện thoại hoặc WebTerminal):
+
+1. **Lấy đúng thông tin từ trang [my.exness.com](https://my.exness.com):**
+   - Vào tab **Thử nghiệm (Demo)** $\to$ Bấm dấu `...` ở tài khoản $\to$ Chọn **Thông tin tài khoản**:
+     - Xem đúng số **Login** và chính xác tên **Server** (Ví dụ: `Exness-MT5Trial6` - tránh chọn nhầm số đuôi).
+     - Bấm **Đổi mật khẩu giao dịch** để đặt lại mật khẩu MT5 mới (tránh nhầm với mật khẩu web Exness).
+2. **Đăng ký [app.metaapi.cloud](https://app.metaapi.cloud) (Miễn phí 1 tài khoản vĩnh viễn):**
+   - Lấy `Token` tại mục **API Access**.
+   - Bấm **Add Account**: Nhập Login, Server và Mật khẩu vừa đặt ở bước 1 $\to$ Bấm **Deploy** $\to$ Copy `Account ID`.
+3. **Cấu hình file `.env`:**
+   ```env
+   META_API_TOKEN=your_meta_api_token
+   META_API_ACCOUNT_ID=your_account_id
+   EXNESS_SYMBOL=XAUUSD
+   EXNESS_LOT_SIZE=0.01
+   ```
+4. **Khởi động Bot:**
+   ```bash
+   pnpm run scalp
+   ```
+
+---
+
+### 🌟 Giải Pháp 2: Cài EA Bridge Trực Tiếp Vào MT5 Desktop (100% Miễn Phí & Cục Bộ)
+Dành cho bạn đã cài phần mềm MetaTrader 5 trên máy tính (không cần đăng ký tài khoản đám mây trung gian nào):
+
+1. Mở phần mềm MT5 $\to$ Menu **File** $\to$ **Open Data Folder** $\to$ vào thư mục `MQL5/Experts`.
+2. Copy file `mt5/GoldScalpBridge.mq5` của dự án dán vào thư mục này.
+3. Vào MT5 $\to$ Menu **Tools** $\to$ **Options** (`Ctrl + O`) $\to$ Tab **Expert Advisors**:
+   - Tích chọn **Allow WebRequest for listed URL**.
+   - Thêm URL: `http://127.0.0.1:3001` $\to$ Bấm **OK**.
+4. Mở chart Vàng `XAUUSD` khung `M1` $\to$ Kéo file `GoldScalpBridge` từ Navigator vào biểu đồ $\to$ Bật nút **Algo Trading**.
+5. Chạy bot trong terminal: `pnpm run scalp`. Lệnh sẽ tự động khớp và chốt lời đúng 1 giá ngay trên MT5 của bạn!
 
 ---
 

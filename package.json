@@ -5,7 +5,9 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "dev": "node --watch bot.js"
+    "dev": "node --watch bot.js",
+    "scalp": "node bot-scalp.js",
+    "scalp:dev": "node --watch bot-scalp.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -15,6 +17,7 @@
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
+    "metaapi.cloud-sdk": "^29.3.3",
     "node-cron": "^3.0.3",
     "technicalindicators": "^3.1.0",
     "yahoo-finance2": "^4.0.2"
