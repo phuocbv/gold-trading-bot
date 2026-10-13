@@ -187,9 +187,9 @@ class OnePriceScalpStrategy {
   }
 
   /**
-   * Phân tích thị trường 1m kết hợp lọc đa khung thời gian 5m
+   * Phân tích thị trường 1m kết hợp lọc đa khung thời gian 5m và Order Flow Dòng lệnh
    */
-  analyze(marketData, marketData5m = null) {
+  analyze(marketData, marketData5m = null, orderBook = null) {
     if (!marketData || marketData.closes.length < 60) return null;
 
     const ind = this.calculateIndicators(marketData);
@@ -221,6 +221,9 @@ class OnePriceScalpStrategy {
     // Xác định xu hướng khung 5M (Higher Timeframe Filter)
     const htf = this.calculateHtfTrend(marketData5m);
 
+    // Dữ liệu Dòng lệnh Order Flow (Taker Buy vs Taker Sell) của cây nến 1m gần nhất
+    const of = marketData.latestOrderFlow || null;
+
     let action = null;
     let setupType = null;
     let score = 50; // Điểm cơ sở chặt chẽ từ 50
@@ -230,47 +233,75 @@ class OnePriceScalpStrategy {
     const is1mDowntrend = ema9 < ema21 && currentPrice < ema50;
 
     // ===============================================================
+    // PATTERN 0: ORDER FLOW BOTTOM ABSORPTION & TOP EXHAUSTION
+    // Bắt Đáy gom hàng / Bắt Đỉnh xả hàng theo Dòng lệnh cá mập
+    // ===============================================================
+    if (of) {
+      // 🟢 BẮT ĐÁY GOM HÀNG: Giá ở vùng thấp + Lực Mua chủ động áp đảo > 68% + Nến rút chân
+      const isLowZone = (bb && currentPrice <= bb.lower * 1.001) || rsi <= 38 || (stochK != null && stochK <= 28);
+      const isAggressiveBuyer = of.buyRatio >= 68 && of.volumeDelta > 0;
+      const isBottomCandle = candle.isHammer || candle.isBullish || candle.isBullishEngulfing;
+
+      if (htf.bias !== 'ONLY_SELL' && isLowZone && isAggressiveBuyer && isBottomCandle) {
+        action = 'BUY';
+        setupType = 'Order Flow Bottom Absorption (Bắt đáy gom hàng)';
+        score += 25;
+        breakdown.push(`Order Flow Gom Hàng: Mua chủ động ${of.buyRatio}% (Delta +${of.volumeDelta.toFixed(2)}): +25đ`);
+      }
+
+      // 🔴 BẮT ĐỈNH XẢ HÀNG: Giá ở vùng cao + Lực Bán chủ động áp đảo > 68% + Nến từ chối râu trên
+      const isHighZone = (bb && currentPrice >= bb.upper * 0.999) || rsi >= 62 || (stochK != null && stochK >= 72);
+      const isAggressiveSeller = of.sellRatio >= 68 && of.volumeDelta < 0;
+      const isTopCandle = candle.isShootingStar || candle.isBearish || candle.isBearishEngulfing;
+
+      if (!action && htf.bias !== 'ONLY_BUY' && isHighZone && isAggressiveSeller && isTopCandle) {
+        action = 'SELL';
+        setupType = 'Order Flow Top Exhaustion (Bắt đỉnh xả hàng)';
+        score += 25;
+        breakdown.push(`Order Flow Xả Hàng: Bán chủ động ${of.sellRatio}% (Delta ${of.volumeDelta.toFixed(2)}): +25đ`);
+      }
+    }
+
+    // ===============================================================
     // PATTERN 1: MULTI-TIMEFRAME TREND PULLBACK (Thuận xu hướng 5m & 1m)
     // Tỷ lệ thắng cao nhất: Chỉ đánh theo chiều sóng lớn!
     // ===============================================================
-    if (htf.bias !== 'ONLY_SELL' && is1mUptrend) {
-      // Giá hồi về gần EMA9/EMA21 và bật lên, RSI giữ vững vùng 45-68 hướng lên
-      const nearEma = Math.abs(currentPrice - ema9) <= 0.8 || Math.abs(currentPrice - ema21) <= 0.8;
-      const rsiHealthy = rsi >= 44 && rsi <= 68 && rsi >= prevRsi;
-      const stochBullishCross = stochK != null && stochD != null && stochK >= stochD && stochK < 80;
-      const bounceCandle = candle.isBullish || candle.isHammer || candle.isBullishEngulfing;
+    if (!action) {
+      if (htf.bias !== 'ONLY_SELL' && is1mUptrend) {
+        const nearEma = Math.abs(currentPrice - ema9) <= 0.8 || Math.abs(currentPrice - ema21) <= 0.8;
+        const rsiHealthy = rsi >= 44 && rsi <= 68 && rsi >= prevRsi;
+        const stochBullishCross = stochK != null && stochD != null && stochK >= stochD && stochK < 80;
+        const bounceCandle = candle.isBullish || candle.isHammer || candle.isBullishEngulfing;
 
-      if (nearEma && rsiHealthy && stochBullishCross && bounceCandle) {
-        action = 'BUY';
-        setupType = 'Micro-Trend Pullback (Thuận xu hướng 5m & 1m)';
-        score += 20;
-        breakdown.push(`Thuận xu hướng 5M (${htf.label}): +20đ`);
-        score += 10;
-        breakdown.push('Cấu trúc EMA 9/21/50 dốc lên: +10đ');
-      }
-    } else if (htf.bias !== 'ONLY_BUY' && is1mDowntrend) {
-      // Giá hồi về gần EMA9/EMA21 và quay đầu giảm, RSI vùng 32-56 hướng xuống
-      const nearEma = Math.abs(currentPrice - ema9) <= 0.8 || Math.abs(currentPrice - ema21) <= 0.8;
-      const rsiHealthy = rsi <= 56 && rsi >= 32 && rsi <= prevRsi;
-      const stochBearishCross = stochK != null && stochD != null && stochK <= stochD && stochK > 20;
-      const dropCandle = candle.isBearish || candle.isShootingStar || candle.isBearishEngulfing;
+        if (nearEma && rsiHealthy && stochBullishCross && bounceCandle) {
+          action = 'BUY';
+          setupType = 'Micro-Trend Pullback (Thuận xu hướng 5m & 1m)';
+          score += 20;
+          breakdown.push(`Thuận xu hướng 5M (${htf.label}): +20đ`);
+          score += 10;
+          breakdown.push('Cấu trúc EMA 9/21/50 dốc lên: +10đ');
+        }
+      } else if (htf.bias !== 'ONLY_BUY' && is1mDowntrend) {
+        const nearEma = Math.abs(currentPrice - ema9) <= 0.8 || Math.abs(currentPrice - ema21) <= 0.8;
+        const rsiHealthy = rsi <= 56 && rsi >= 32 && rsi <= prevRsi;
+        const stochBearishCross = stochK != null && stochD != null && stochK <= stochD && stochK > 20;
+        const dropCandle = candle.isBearish || candle.isShootingStar || candle.isBearishEngulfing;
 
-      if (nearEma && rsiHealthy && stochBearishCross && dropCandle) {
-        action = 'SELL';
-        setupType = 'Micro-Trend Pullback (Thuận xu hướng 5m & 1m)';
-        score += 20;
-        breakdown.push(`Thuận xu hướng 5M (${htf.label}): +20đ`);
-        score += 10;
-        breakdown.push('Cấu trúc EMA 9/21/50 dốc xuống: +10đ');
+        if (nearEma && rsiHealthy && stochBearishCross && dropCandle) {
+          action = 'SELL';
+          setupType = 'Micro-Trend Pullback (Thuận xu hướng 5m & 1m)';
+          score += 20;
+          breakdown.push(`Thuận xu hướng 5M (${htf.label}): +20đ`);
+          score += 10;
+          breakdown.push('Cấu trúc EMA 9/21/50 dốc xuống: +10đ');
+        }
       }
     }
 
     // ===============================================================
     // PATTERN 2: BOLLINGER BAND MEAN REVERSION (CHỈ ÁP DỤNG KHI 5M SIDEWAY)
-    // Tuyệt đối CẤM bắt đỉnh/đáy ngược khi khung 5m đang có xu hướng mạnh!
     // ===============================================================
     if (!action && htf.trend === 'NEUTRAL' && bb) {
-      // BUY khi chạm Lower Band + Quá bán RSI/Stoch + Nến rút chân
       if (currentPrice <= bb.lower * 1.0006 && (rsi <= 32 || (stochK != null && stochK <= 20))) {
         if (candle.isHammer || candle.isBullish || candle.isBullishEngulfing) {
           action = 'BUY';
@@ -278,9 +309,7 @@ class OnePriceScalpStrategy {
           score += 15;
           breakdown.push('Chạm biên dưới BB vùng Sideway: +15đ');
         }
-      }
-      // SELL khi chạm Upper Band + Quá mua RSI/Stoch + Nến đảo chiều
-      else if (currentPrice >= bb.upper * 0.9994 && (rsi >= 68 || (stochK != null && stochK >= 80))) {
+      } else if (currentPrice >= bb.upper * 0.9994 && (rsi >= 68 || (stochK != null && stochK >= 80))) {
         if (candle.isShootingStar || candle.isBearish || candle.isBearishEngulfing) {
           action = 'SELL';
           setupType = 'Range Upper Rejection (Bắt đỉnh biên đi ngang 1m)';
@@ -308,6 +337,38 @@ class OnePriceScalpStrategy {
     }
 
     if (!action) return null;
+
+    // Đánh giá cộng/trừ điểm theo Order Flow thực tế
+    if (of) {
+      if (action === 'BUY') {
+        if (of.buyRatio >= 62) {
+          score += 8;
+          breakdown.push(`Lực Mua chủ động ủng hộ (${of.buyRatio}%): +8đ`);
+        } else if (of.sellRatio >= 65) {
+          score -= 20; // Phạt nặng nếu BUY nhưng phe bán đang xả mạnh
+          breakdown.push(`Cảnh báo lực Bán áp đảo (${of.sellRatio}%): -20đ`);
+        }
+      } else if (action === 'SELL') {
+        if (of.sellRatio >= 62) {
+          score += 8;
+          breakdown.push(`Lực Bán chủ động ủng hộ (${of.sellRatio}%): +8đ`);
+        } else if (of.buyRatio >= 65) {
+          score -= 20; // Phạt nặng nếu SELL nhưng phe mua đang gom mạnh
+          breakdown.push(`Cảnh báo lực Mua áp đảo (${of.buyRatio}%): -20đ`);
+        }
+      }
+    }
+
+    // Đánh giá áp lực Sổ lệnh (Order Book Depth)
+    if (orderBook) {
+      if (action === 'BUY' && orderBook.imbalance === 'BUY_PRESSURE') {
+        score += 6;
+        breakdown.push(`Sổ lệnh chờ Mua chiếm ưu thế (${orderBook.bidPercent}%): +6đ`);
+      } else if (action === 'SELL' && orderBook.imbalance === 'SELL_PRESSURE') {
+        score += 6;
+        breakdown.push(`Sổ lệnh chờ Bán chiếm ưu thế (${orderBook.askPercent}%): +6đ`);
+      }
+    }
 
     // Điểm cộng nến xác nhận Price Action
     if (candle.isHammer || candle.isShootingStar || candle.isBullishEngulfing || candle.isBearishEngulfing) {
@@ -365,6 +426,8 @@ class OnePriceScalpStrategy {
         atr,
         stochK,
         stochD,
+        orderFlow: of,
+        orderBook: orderBook ? { bidPercent: orderBook.bidPercent, askPercent: orderBook.askPercent } : null,
         pattern: candle.isHammer ? 'Pinbar Hammer' :
                  candle.isShootingStar ? 'Shooting Star' :
                  candle.isBullishEngulfing ? 'Bullish Engulfing' :

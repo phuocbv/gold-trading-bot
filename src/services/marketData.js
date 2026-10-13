@@ -63,13 +63,20 @@ async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
       const opens = [];
       const volumes = [];
       const candles = [];
+      const orderFlowList = [];
 
       rawKlines.forEach((k, index) => {
         const open = parseFloat(k[1]);
         let high = parseFloat(k[2]);
         let low = parseFloat(k[3]);
         let close = parseFloat(k[4]);
-        const volume = parseFloat(k[5]);
+        const volume = parseFloat(k[5]) || 0;
+        const takerBuyVolume = parseFloat(k[9]) || 0;
+        const takerSellVolume = Math.max(0, volume - takerBuyVolume);
+        const volumeDelta = takerBuyVolume - takerSellVolume;
+        const buyRatio = volume > 0 ? (takerBuyVolume / volume) * 100 : 50;
+        const sellRatio = 100 - buyRatio;
+        const tradeCount = parseInt(k[8], 10) || 0;
         const date = new Date(k[0]);
 
         // Cập nhật nến hiện tại với giá realtime tick mới nhất
@@ -91,10 +98,36 @@ async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
           low,
           close,
           volume,
+          takerBuyVolume,
+          takerSellVolume,
+          volumeDelta,
+          buyRatio,
+          sellRatio,
+        });
+
+        orderFlowList.push({
+          totalVolume: volume,
+          takerBuyVolume,
+          takerSellVolume,
+          volumeDelta,
+          buyRatio: parseFloat(buyRatio.toFixed(1)),
+          sellRatio: parseFloat(sellRatio.toFixed(1)),
+          tradeCount,
         });
       });
 
-      return { closes, highs, lows, opens, volumes, candles, isRealtime: true, source: 'Binance Spot (PAXG/USDT)' };
+      return {
+        closes,
+        highs,
+        lows,
+        opens,
+        volumes,
+        candles,
+        orderFlow: orderFlowList,
+        latestOrderFlow: orderFlowList[orderFlowList.length - 1],
+        isRealtime: true,
+        source: 'Binance Spot (PAXG/USDT)',
+      };
     } catch (err) {
       lastError = err;
       // Nếu gặp lỗi 418 hoặc 429 (IP bị ban/rate limit), không gọi dồn dập các endpoint Binance khác
@@ -304,9 +337,45 @@ async function fetchLivePrice(symbol = 'XAU/USD') {
   return null;
 }
 
+/**
+ * Lấy dữ liệu Sổ lệnh (Order Book Depth) để đo áp lực Chờ Mua (Bid) vs Chờ Bán (Ask)
+ */
+async function fetchOrderBookDepth(limit = 20) {
+  for (const endpoint of BINANCE_ENDPOINTS) {
+    try {
+      const res = await axios.get(`${endpoint}/api/v3/depth?symbol=PAXGUSDT&limit=${limit}`, {
+        headers: HTTP_HEADERS,
+        timeout: 3000,
+      });
+      if (res.data && res.data.bids && res.data.asks) {
+        const totalBid = res.data.bids.reduce((sum, b) => sum + parseFloat(b[1]), 0);
+        const totalAsk = res.data.asks.reduce((sum, a) => sum + parseFloat(a[1]), 0);
+        const total = totalBid + totalAsk;
+        const bidPercent = total > 0 ? (totalBid / total) * 100 : 50;
+        const askPercent = 100 - bidPercent;
+        return {
+          totalBid: parseFloat(totalBid.toFixed(2)),
+          totalAsk: parseFloat(totalAsk.toFixed(2)),
+          bidPercent: parseFloat(bidPercent.toFixed(1)),
+          askPercent: parseFloat(askPercent.toFixed(1)),
+          imbalance: bidPercent >= 58 ? 'BUY_PRESSURE' : askPercent >= 58 ? 'SELL_PRESSURE' : 'BALANCED',
+        };
+      }
+    } catch (e) {}
+  }
+  return {
+    totalBid: 0,
+    totalAsk: 0,
+    bidPercent: 50,
+    askPercent: 50,
+    imbalance: 'BALANCED',
+  };
+}
+
 module.exports = {
   fetchCandles,
   fetchMultiTimeframeCandles,
   fetchLivePrice,
+  fetchOrderBookDepth,
 };
 

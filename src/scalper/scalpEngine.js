@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const CONFIG = require('../config');
-const { fetchCandles, fetchLivePrice } = require('../services/marketData');
+const { fetchCandles, fetchLivePrice, fetchOrderBookDepth } = require('../services/marketData');
 const { sendScalpOpenAlert, sendScalpCloseAlert } = require('../services/telegram');
 const OnePriceScalpStrategy = require('./scalpStrategy');
 const PositionTracker = require('./positionTracker');
@@ -76,10 +76,11 @@ class ScalpEngine {
         return;
       }
 
-      console.log(`[${nowStr}] 🔍 [Scalp 1M] Đang tải nến 1m & 5m (${this.config.symbol}) và phân tích...`);
-      const [marketData, marketData5m] = await Promise.all([
+      console.log(`[${nowStr}] 🔍 [Scalp 1M] Đang tải nến 1m, 5m & Order Flow (${this.config.symbol})...`);
+      const [marketData, marketData5m, orderBook] = await Promise.all([
         fetchCandles(this.config.symbol, this.config.timeframe, 2),
         fetchCandles(this.config.symbol, '5m', 2).catch(() => null),
+        fetchOrderBookDepth(20).catch(() => null),
       ]);
 
       if (!marketData || !marketData.closes || marketData.closes.length < 60) {
@@ -88,15 +89,18 @@ class ScalpEngine {
       }
 
       const currentPrice = marketData.closes[marketData.closes.length - 1];
-      const signal = this.strategy.analyze(marketData, marketData5m);
+      const signal = this.strategy.analyze(marketData, marketData5m, orderBook);
       const htfInfo = this.strategy.calculateHtfTrend(marketData5m);
+      const of = marketData.latestOrderFlow;
 
       const isMt5Active = this.mt5LivePrice && (Date.now() - this.mt5LivePrice.timestamp < 10000);
       const displayPrice = isMt5Active ? this.mt5LivePrice.mid : currentPrice;
 
       if (!signal) {
         const sourceLabel = isMt5Active ? `MT5 ${this.mt5LivePrice.symbol}` : 'Binance';
-        console.log(`ℹ️ [${nowStr}] [Scalp 1M] Giá hiện tại (${sourceLabel}): $${displayPrice.toFixed(2)} | Xu hướng 5M: ${htfInfo.label} -> Chưa có tín hiệu.`);
+        const ofStr = of ? ` | 📊 Mua ${of.buyRatio}% vs Bán ${of.sellRatio}% (Delta ${of.volumeDelta > 0 ? '+' : ''}${of.volumeDelta.toFixed(2)})` : '';
+        const obStr = orderBook && orderBook.totalBid > 0 ? ` | Sổ lệnh: ${orderBook.bidPercent}% Bid` : '';
+        console.log(`ℹ️ [${nowStr}] [Scalp 1M] Giá (${sourceLabel}): $${displayPrice.toFixed(2)} | 5M: ${htfInfo.label}${ofStr}${obStr} -> Chưa có tín hiệu.`);
         return;
       }
 

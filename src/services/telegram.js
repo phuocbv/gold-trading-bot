@@ -208,6 +208,14 @@ async function sendScalpOpenAlert(position) {
     if (position.indicators.atr != null) {
       msg += `• ATR(14): \`${position.indicators.atr.toFixed(2)}\`\n`;
     }
+    if (position.indicators.orderFlow) {
+      const of = position.indicators.orderFlow;
+      msg += `• 📊 Order Flow: \`Mua ${of.buyRatio}% | Bán ${of.sellRatio}% (Delta ${of.volumeDelta > 0 ? '+' : ''}${of.volumeDelta.toFixed(2)})\`\n`;
+    }
+    if (position.indicators.orderBook) {
+      const ob = position.indicators.orderBook;
+      msg += `• 📖 Sổ lệnh: \`${ob.bidPercent}% Chờ Mua vs ${ob.askPercent}% Chờ Bán\`\n`;
+    }
   }
 
   msg += `\n💡 _Bot đang giám sát giá Realtime từng giây. Khi đạt đúng +1 giá là lập tức đóng lệnh chốt lời!_`;
