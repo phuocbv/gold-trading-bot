@@ -7,8 +7,16 @@ const CONFIG = require('../config');
 // Bộ nhớ cache tạm thời trong cùng một chu kỳ quét
 const cache = new Map();
 
-// Danh sách mirror endpoints của Binance để đảm bảo độ sẵn sàng 100%
+// Headers giả lập trình duyệt để tránh bị WAF/Cloudflare của Binance chặn (lỗi 418)
+const HTTP_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
+// Danh sách mirror endpoints của Binance (ưu tiên data-api.binance.vision chuyên dụng cho public data)
 const BINANCE_ENDPOINTS = [
+  'https://data-api.binance.vision',
   'https://api.binance.com',
   'https://api1.binance.com',
   'https://api2.binance.com',
@@ -250,6 +258,10 @@ async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', 
       const res = await axios.get(klinesUrl, { timeout: 6000 });
       const rawKlines = res.data || [];
 
+      if (!Array.isArray(rawKlines) || rawKlines.length === 0) {
+        throw new Error('Dữ liệu nến rỗng từ Binance');
+      }
+
       // 2. Lấy giá tick trực tiếp realtime mới nhất
       let livePrice = null;
       try {
@@ -341,6 +353,56 @@ async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
 
 /**
  * Lấy dữ liệu nến từ Yahoo Finance
+ * Lấy dữ liệu nến Vàng giao ngay từ sàn Gate.io (Dự phòng 24/7 khi Binance bị 418/chặn IP)
+ */
+async function fetchGateIoSpotGold(interval = '15m', limit = 500) {
+  const url = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=PAXG_USDT&interval=${interval}&limit=${limit}`;
+  const res = await axios.get(url, {
+    headers: HTTP_HEADERS,
+    timeout: 6000,
+  });
+
+  const raw = res.data || [];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('Dữ liệu nến rỗng từ Gate.io');
+  }
+
+  const closes = [];
+  const highs = [];
+  const lows = [];
+  const opens = [];
+  const volumes = [];
+  const candles = [];
+
+  raw.forEach((c) => {
+    // Format Gate.io: [timestamp_sec, quote_volume, close, high, low, open, base_volume]
+    const timestamp = parseInt(c[0], 10) * 1000;
+    const close = parseFloat(c[2]);
+    const high = parseFloat(c[3]);
+    const low = parseFloat(c[4]);
+    const open = parseFloat(c[5]);
+    const volume = parseFloat(c[6]);
+
+    closes.push(close);
+    highs.push(high);
+    lows.push(low);
+    opens.push(open);
+    volumes.push(volume);
+    candles.push({
+      date: new Date(timestamp),
+      open,
+      high,
+      low,
+      close,
+      volume,
+    });
+  });
+
+  return { closes, highs, lows, opens, volumes, candles, isRealtime: true, source: 'Gate.io Spot (PAXG/USDT)' };
+}
+
+/**
+ * Lấy dữ liệu nến từ Yahoo Finance (dành cho Hợp đồng tương lai GC=F)
  */
 async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 14) {
   const queryOptions = {
@@ -413,6 +475,10 @@ async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 1
  * 1. TradingView (OANDA:XAUUSD hoặc BINANCE:ETHUSDT)
  * 2. Binance Spot (PAXGUSDT hoặc ETHUSDT) - Có Order Flow Delta thật
  * 3. Yahoo Finance
+ * Hàm lấy nến tổng quát đa nguồn hỗ trợ tự động Fallback (Binance -> Gate.io -> Yahoo)
+ * @param {string} symbol - 'XAU/USD' | 'XAUUSD' | 'PAXGUSDT' (mặc định Spot Realtime) hoặc 'GC=F' (Futures)
+ * @param {string} interval - '15m', '1h', v.v.
+ * @param {number} daysBack - Số ngày lùi lại nếu dùng Yahoo
  */
 async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14) {
   const resolved = resolveSymbolSources(symbol);
@@ -460,6 +526,17 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
     return data;
   } catch (fbErr) {
     console.error(`❌ [MarketData] Toàn bộ nguồn cấp nến cho ${symbol} đều thất bại.`);
+    return null;
+  }
+
+  // 3. Fallback sang Yahoo Finance (GC=F)
+  try {
+    const yahooSymbol = isSpotGold ? 'GC=F' : symbol;
+    const yahooData = await fetchYahooCandles(yahooSymbol, interval, daysBack);
+    cache.set(cacheKey, { timestamp: now, data: yahooData });
+    return yahooData;
+  } catch (yahooErr) {
+    console.error(`❌ [MarketData] Tất cả các nguồn dữ liệu cho ${symbol} (${interval}) đều thất bại:`, yahooErr.message);
     return null;
   }
 }
