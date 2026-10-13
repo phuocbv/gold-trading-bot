@@ -1,23 +1,29 @@
-# Gold Trading Bot (Node.js AI Co-Pilot)
+# Gold & Crypto Trading Bot (Node.js AI Co-Pilot & Order Flow Engine)
 
-Hệ thống tự động phân tích thị trường Vàng (Gold Forex / XAU/USD - GC=F) theo thời gian thực kết hợp **Đa Chiến Lược Kỹ Thuật (Multi-Strategy)** và **Trợ Lý AI (Google Gemini)** thẩm định bẫy giá và phát tín hiệu chất lượng cao về Telegram.
+Hệ thống tự động phân tích thị trường Vàng (XAU/USD) & Crypto (ETH, BTC) theo thời gian thực kết hợp **Đa Chiến Lược Kỹ Thuật (Multi-Strategy)**, **Hệ Thống Bắt Đỉnh Đáy Order Flow (Confluence Scoring)** và **Trợ Lý AI (Google Gemini Multi-Key Pool)** thẩm định bẫy giá và phát tín hiệu chất lượng cao về Telegram.
 
 ---
 
 ## 🌟 Tính Năng Nổi Bật
 
-### 1. 4 Phương Pháp Phân Tích Kỹ Thuật Chuyên Nghiệp:
+### 1. 7 Phương Pháp Phân Tích Kỹ Thuật & Dòng Lệnh Chuyên Nghiệp:
+- 💎 **Order Flow & Liquidity Reversal (High Win-Rate 75-85%)**: Tích hợp từ engine `crypto-gold-detector`, phát hiện đỉnh/đáy đa chiều dựa trên **5 trụ cột đồng thuận**:
+  1. *Smart Money Sweep*: Quét qua đỉnh/đáy 25 nến trước đó (quét sạch Stop Loss) kèm râu nến từ chối $\ge 35\% - 50\%$.
+  2. *Volume Climax & Order Flow Delta*: Khối lượng giao dịch đột biến $\ge 1.5x - 2.0x$ Volume SMA 20 + Delta hấp thụ cung/cầu (Taker Buy vs Sell Volume).
+  3. *Momentum RSI & Swing Divergence*: Phân kỳ âm tại đỉnh / Phân kỳ dương tại đáy hoặc vùng quá mua/quá bán cực độ.
+  4. *Bollinger Bands 2.0σ*: Thủng dải Band rồi nén ngược vào trong (Mean Reversion).
+  5. *Trend Filter EMA 50*: Thuận sóng hồi xu hướng ngắn hạn.
 - 📈 **Trend Following (Bám Xu Hướng)**: Kết hợp EMA Ribbon (20/50/200), MACD Crossover và RSI pullback để bắt sóng thuận trend lớn.
 - 🔄 **Mean Reversion (Đảo Chiều Ngắn Hạn)**: Dùng Bollinger Bands (20, 2) + RSI quá mua/quá bán kết hợp nến rút chân/đảo chiều khi thị trường sideway.
 - 💥 **Volatility Breakout (Bùng Nổ Biên Độ)**: Phá vỡ đỉnh/đáy 20 nến (Donchian Range) kèm biên độ nến vượt 1.2x ATR.
 - 🏛 **SMC Lite (Smart Money Concepts)**: Nhận diện khoảng trống FVG (Fair Value Gap) và phản ứng khi giá retest khối lệnh Order Block.
+- ⚡ **RSI Divergence (Phân Kỳ Đỉnh Đáy)**: Phát hiện phân kỳ thường giữa giá và RSI kết hợp xác nhận nến Pinbar/Engulfing.
+- 🌊 **Smart Money Flow (Volume VWAP ADX)**: Đánh giá sức mạnh dòng tiền tổ chức qua VWAP và MFI.
 
-### 2. Trợ Lý AI Thẩm Định (Google Gemini):
-- Đóng vai trò Senior Quant Trader: Đánh giá bẫy giá (Bull/Bear Trap, Liquidity Sweep), kiểm tra cản cứng S/R.
-- Chấm điểm **Confidence Score (0-100%)**: Chỉ duyệt phát lệnh Telegram khi độ tin cậy đạt mức tối thiểu (mặc định $\ge 75\%$).
-- **Cơ chế Multi-Key Pool**: Hỗ trợ nhiều API Key đồng thời, tự động xoay tua (Round-Robin) chia tải và tự động chuyển key (Instant Failover + Cooldown 60s) khi chạm Rate Limit 429 hoặc hết quota Free Tier.
-- Tự động fallback chạy chế độ kỹ thuật thuần nếu chưa điền API Key hoặc khi mạng gián đoạn.
-- Bản tin thị trường định kỳ (AI Briefing) trước các phiên giao dịch chính (Âu 13:00, Mỹ 19:30).
+### 2. Quét Đa Tài Sản (Multi-Asset) & Dữ Liệu Order Flow Delta Thực:
+- Hỗ trợ quét đồng thời: **Vàng (XAU/USD)**, **Ethereum (ETH/USDT)**, **Bitcoin (BTC/USDT)**.
+- Kết nối trực tiếp **TradingView WebSocket Datafeed** (chuẩn 100% Forex) và **Binance Spot Datafeed** (lấy chính xác Taker Buy/Sell Volume để tính Order Flow Delta).
+- Hỗ trợ chế độ kiểm tra nhanh 1 lần: `node bot.js --once`.
 
 ---
 
@@ -65,10 +71,12 @@ Tạo file `.env` (hoặc sao chép từ `.env.example`):
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
 
-# Thị trường
+# Thị trường & Nguồn dữ liệu
 SYMBOL=XAU/USD
 TIMEFRAME=15m
 CRON_SCHEDULE=*/5 * * * *
+MARKET_DATA_SOURCE=TRADINGVIEW
+TRADINGVIEW_SYMBOL=OANDA:XAUUSD
 
 # Trợ lý AI (Google Gemini - Hỗ trợ 1 hoặc nhiều key phân tách bởi dấu phẩy)
 GEMINI_API_KEYS=gemini_key_1,gemini_key_2,gemini_key_3

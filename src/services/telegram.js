@@ -90,14 +90,15 @@ async function sendTradeAlert(signal) {
   const isBuy = signal.action.toUpperCase() === 'BUY';
   const icon = isBuy ? '🟢 MUA (BUY)' : '🔴 BÁN (SELL)';
   const headerIcon = isBuy ? '🚀' : '🔻';
+  const assetName = signal.displayName || signal.symbol || CONFIG.symbol;
 
-  let msg = `${headerIcon} *TÍN HIỆU GIAO DỊCH VÀNG (${CONFIG.symbol})* ${headerIcon}\n\n`;
+  let msg = `${headerIcon} *TÍN HIỆU GIAO DỊCH (${assetName})* ${headerIcon}\n\n`;
   msg += `📌 *Chiến Lược:* \`${signal.strategy}\`\n`;
   msg += `👉 *Hành Động:* *${icon}*\n`;
   msg += `⏱ *Khung Giờ:* \`${CONFIG.timeframe}\`\n`;
 
   if (signal.score != null) {
-    msg += `🏆 *Đánh Giá:* \`${signal.score}/100\` — *${signal.rankBadge || signal.rank}*\n`;
+    msg += `🏆 *Đánh Giá:* \`${signal.score}/100\` — *${signal.rankBadge || signal.grade || signal.rank}*\n`;
     if (signal.alliedStrategies && signal.alliedStrategies.length > 1) {
       msg += `🤝 *Hợp Lưu Đồng Thuận:* \`${signal.alliedStrategies.join(' + ')}\`\n`;
     }
@@ -113,17 +114,34 @@ async function sendTradeAlert(signal) {
   }
   msg += `• *Tỉ lệ R:R:* \`${signal.rrRatio || '1 : 2'}\`\n\n`;
 
+  // Danh sách các yếu tố hội tụ (từ crypto-gold-detector)
+  const factorsList = signal.factors || (signal.breakdown && signal.breakdown.filter((f) => !f.includes('Cơ sở')));
+  if (factorsList && factorsList.length > 0) {
+    msg += `🔍 *YẾU TỐ HỘI TỤ TẠO NÊN TỈ LỆ THẮNG CAO:*\n`;
+    factorsList.forEach((f) => {
+      msg += `• _${f}_\n`;
+    });
+    msg += `\n`;
+  }
+
   msg += `📊 *CHỈ SỐ KỸ THUẬT:*\n`;
   if (signal.indicators.rsi != null) msg += `• RSI(14): \`${signal.indicators.rsi.toFixed(1)}\`\n`;
+  if (signal.indicators.delta != null && signal.indicators.delta !== 0) {
+    msg += `• Order Flow Delta: \`${signal.indicators.delta > 0 ? '+' : ''}${signal.indicators.delta.toFixed(1)}\`\n`;
+  }
+  if (signal.indicators.volRatio && signal.indicators.volRatio !== 'N/A') {
+    msg += `• Đột biến Volume: \`${signal.indicators.volRatio}\`\n`;
+  } else if (signal.indicators.volumeRatio && signal.indicators.volumeRatio !== 'N/A') {
+    msg += `• Đột biến Volume: \`${signal.indicators.volumeRatio}\`\n`;
+  }
+  if (signal.indicators.upperWickRatio) msg += `• Râu trên từ chối: \`${signal.indicators.upperWickRatio}\`\n`;
+  if (signal.indicators.lowerWickRatio) msg += `• Rút chân hỗ trợ: \`${signal.indicators.lowerWickRatio}\`\n`;
   if (signal.indicators.adx != null && signal.indicators.adx > 0) {
     msg += `• ADX(14): \`${signal.indicators.adx.toFixed(1)}\` (${signal.indicators.adx >= 22 ? 'Xu hướng mạnh' : 'Sideway'})\n`;
   }
   if (signal.indicators.stochRsiK != null) msg += `• StochRSI (%K): \`${signal.indicators.stochRsiK.toFixed(1)}\`\n`;
   if (signal.indicators.vwap != null) msg += `• VWAP: \`$${signal.indicators.vwap.toFixed(2)}\`\n`;
   if (signal.indicators.mfi != null) msg += `• MFI(14): \`${signal.indicators.mfi.toFixed(1)}\`\n`;
-  if (signal.indicators.volumeRatio && signal.indicators.volumeRatio !== 'N/A') {
-    msg += `• Đột biến Volume: \`${signal.indicators.volumeRatio}\`\n`;
-  }
   if (signal.indicators.divergenceDetail) {
     msg += `• Phân kỳ: _${signal.indicators.divergenceDetail}_\n`;
   }
@@ -135,6 +153,7 @@ async function sendTradeAlert(signal) {
   }
   if (signal.indicators.atr != null) msg += `• ATR(14): \`${signal.indicators.atr.toFixed(2)}\`\n`;
   if (signal.indicators.ema20 != null) msg += `• EMA20: \`${signal.indicators.ema20.toFixed(2)}\`\n`;
+  if (signal.indicators.ema50 != null) msg += `• EMA50: \`${signal.indicators.ema50.toFixed(2)}\`\n`;
   if (signal.indicators.ema200 != null) msg += `• EMA200: \`${signal.indicators.ema200.toFixed(2)}\`\n`;
 
   if (signal.aiReview) {
@@ -158,7 +177,8 @@ async function sendTradeAlert(signal) {
  * Gửi bản tin thị trường định kỳ do AI tổng hợp
  */
 async function sendMarketDigest(digest) {
-  let msg = `📋 *BẢN TIN THỊ TRƯỜNG VÀNG ĐỊNH KỲ (AI BRIEFING)* 📋\n\n`;
+  const assetName = digest.displayName || digest.symbol || CONFIG.symbol;
+  let msg = `📋 *BẢN TIN THỊ TRƯỜNG ĐỊNH KỲ (${assetName})* 📋\n\n`;
   msg += `🕒 *Thời gian:* ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}\n`;
   msg += `💰 *Giá hiện tại:* \`$${digest.currentPrice.toFixed(2)}\`\n\n`;
   msg += `📈 *Xu hướng chính:* \`${digest.trend}\`\n`;

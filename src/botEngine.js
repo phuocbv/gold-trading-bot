@@ -1,9 +1,21 @@
 const CONFIG = require('./config');
 const { fetchCandles } = require('./services/marketData');
-const { evaluateAllStrategies } = require('./strategies');
+const { evaluateAllStrategies, strategies } = require('./strategies');
 const { validateTradeSignal, generateMarketDigest } = require('./ai/geminiAnalyzer');
 const { sendTradeAlert, sendMarketDigest } = require('./services/telegram');
 const { EMA, RSI, ATR, ADX, StochasticRSI, VWAP, MFI } = require('technicalindicators');
+
+/**
+ * Vẽ thanh đo điểm số Confluence trực quan trên console (từ crypto-gold-detector)
+ */
+function renderScoreBar(score) {
+  const totalBars = 10;
+  const filledBars = Math.min(10, Math.max(0, Math.round((score / 100) * totalBars)));
+  const emptyBars = totalBars - filledBars;
+  const bar = '█'.repeat(filledBars) + '░'.repeat(emptyBars);
+  const color = score >= 80 ? '\x1b[32m' : '\x1b[33m';
+  return `${color}[${bar}] ${score}/100đ\x1b[0m`;
+}
 
 /**
  * Trích xuất snapshot thị trường để phục vụ thẩm định và báo cáo
@@ -61,7 +73,11 @@ function createMarketSnapshot(marketData) {
   const recentHighs = highs.slice(-lookback);
   const recentLows = lows.slice(-lookback);
 
+  const lastCandle = candles && candles.length > 0 ? candles[candles.length - 1] : null;
+
   return {
+    symbol: marketData.symbol || CONFIG.symbol,
+    displayName: marketData.displayName || marketData.symbol || CONFIG.symbol,
     timeframe: CONFIG.timeframe,
     currentPrice,
     ema20: ema20[ema20.length - 1],
@@ -76,6 +92,7 @@ function createMarketSnapshot(marketData) {
     stochD,
     vwap: vwapVal,
     mfi: mfiVal,
+    delta: lastCandle ? (lastCandle.delta || 0) : 0,
     recentHigh: Math.max(...recentHighs),
     recentLow: Math.min(...recentLows),
     recentCandles: candles.slice(-5).map((c) => ({
@@ -88,15 +105,15 @@ function createMarketSnapshot(marketData) {
 }
 
 /**
- * Quét thị trường, chạy các chiến lược và kiểm định bằng AI
+ * Quét một tài sản đơn lẻ (Ví dụ: XAU/USD, ETH/USDT, BTC/USDT)
  */
-async function scanMarket() {
+async function scanSingleSymbol(symbol) {
   const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-  console.log(`[${timestamp}] 🔍 Đang quét thị trường Vàng (${CONFIG.symbol} - ${CONFIG.timeframe})...`);
+  console.log(`\n[${timestamp}] 🔍 Đang quét thị trường: ${symbol} (${CONFIG.timeframe})...`);
 
-  const marketData = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 14);
-  if (!marketData || marketData.closes.length < 200) {
-    console.log('⚠️ Chưa gom đủ dữ liệu nến (cần tối thiểu 200 nến để tính EMA200).');
+  const marketData = await fetchCandles(symbol, CONFIG.timeframe, 14);
+  if (!marketData || marketData.closes.length < 50) {
+    console.log(`⚠️ [${symbol}] Chưa gom đủ dữ liệu nến.`);
     return;
   }
 
@@ -105,34 +122,44 @@ async function scanMarket() {
   const diff = snapshot.currentPrice - prevPrice;
   const changeText = diff >= 0 ? `+${diff.toFixed(2)}` : `${diff.toFixed(2)}`;
 
-  const adxText = snapshot.adx ? ` | ADX: ${snapshot.adx.toFixed(1)} (${snapshot.adx >= 22 ? 'Có Trend' : 'Sideway'})` : '';
+  const adxText = snapshot.adx ? ` | ADX: ${snapshot.adx.toFixed(1)} (${snapshot.adx >= 22 ? 'Trend' : 'Sideway'})` : '';
   const stochText = snapshot.stochK != null ? ` | StochRSI: ${snapshot.stochK.toFixed(0)}` : '';
   const vwapText = snapshot.vwap ? ` | VWAP: $${snapshot.vwap.toFixed(1)}` : '';
+  const deltaText = snapshot.delta !== 0 ? ` | Delta: ${snapshot.delta > 0 ? '+' : ''}${snapshot.delta.toFixed(1)}` : '';
 
-  console.log(`💵 [GIÁ HIỆN TẠI]: $${snapshot.currentPrice.toFixed(2)} (${changeText}) | EMA20: ${snapshot.ema20.toFixed(2)} | RSI: ${snapshot.rsi.toFixed(1)}${adxText}${stochText}${vwapText} | ATR: ${snapshot.atr.toFixed(2)}`);
+  console.log(`💵 [${snapshot.displayName}]: $${snapshot.currentPrice.toFixed(2)} (${changeText}) | EMA20: ${snapshot.ema20?.toFixed(2) || 'N/A'} | RSI: ${snapshot.rsi?.toFixed(1) || 'N/A'}${adxText}${stochText}${vwapText}${deltaText} | ATR: ${snapshot.atr?.toFixed(2) || 'N/A'}`);
 
   // 1. Chạy tất cả các chiến lược kỹ thuật
   const candidateSignals = evaluateAllStrategies(marketData);
 
   if (candidateSignals.length === 0) {
-    console.log(`ℹ️ [Trạng thái]: Đã quét 6 chiến lược -> Chưa có tín hiệu vào lệnh.`);
+    console.log(`ℹ️ [Trạng thái - ${snapshot.displayName}]: Đã quét ${strategies.length} chiến lược -> Chưa có tín hiệu vào lệnh.`);
     return;
   }
 
-  console.log(`⚡ Phát hiện ${candidateSignals.length} tín hiệu kỹ thuật tiềm năng tại giá $${snapshot.currentPrice.toFixed(2)}! Bắt đầu quy trình chấm điểm & thẩm định...`);
+  console.log(`⚡ [${snapshot.displayName}] Phát hiện ${candidateSignals.length} tín hiệu kỹ thuật tiềm năng tại giá $${snapshot.currentPrice.toFixed(2)}! Bắt đầu chấm điểm & thẩm định...`);
 
   // 2. Chấm điểm trọng số và Thẩm định tín hiệu qua AI
   for (const signal of candidateSignals) {
-    const scoreText = signal.score != null ? ` | Điểm: ${signal.score}/100 (${signal.rankBadge || signal.rank})` : '';
-    console.log(`\n👉 Đang xử lý tín hiệu: [${signal.strategy}] - ${signal.action} tại $${signal.entry.toFixed(2)}${scoreText}`);
+    signal.symbol = symbol;
+    signal.displayName = snapshot.displayName;
+
+    const scoreDisplay = signal.score != null ? ` | Confluence: ${renderScoreBar(signal.score)}` : '';
+    const gradeBadge = signal.rankBadge || signal.grade || signal.rank || '';
+    console.log(`\n👉 [${snapshot.displayName}] [${signal.strategy}] - ${signal.action} tại $${signal.entry.toFixed(2)}${scoreDisplay}  ${gradeBadge}`);
 
     if (signal.breakdown && signal.breakdown.length > 0) {
-      console.log(`   📝 Đánh giá trọng số: ${signal.breakdown.join(' | ')}`);
+      console.log(`   🔍 Yếu tố hội tụ tạo nên tỉ lệ thắng cao:`);
+      signal.breakdown.forEach((f) => console.log(`      \x1b[32m✓\x1b[0m \x1b[2m${f}\x1b[0m`));
     }
 
-    // Lọc theo ngưỡng điểm tối thiểu của chiến lược
-    if (signal.score != null && signal.score < CONFIG.minStrategyScore) {
-      console.log(`✋ Tín hiệu bị loại bỏ do điểm chất lượng (${signal.score}/100) thấp hơn ngưỡng tối thiểu (${CONFIG.minStrategyScore}).`);
+    // Lọc theo ngưỡng điểm tối thiểu (mặc định 65 cho Order Flow, 70 cho chiến lược chung)
+    const minThreshold = signal.strategy.includes('Order Flow')
+      ? CONFIG.minConfluenceScore
+      : CONFIG.minStrategyScore;
+
+    if (signal.score != null && signal.score < minThreshold) {
+      console.log(`✋ Tín hiệu bị loại bỏ do điểm chất lượng (${signal.score}/100) thấp hơn ngưỡng tối thiểu (${minThreshold}).`);
       continue;
     }
 
@@ -154,29 +181,54 @@ async function scanMarket() {
     if (shouldSend) {
       signal.aiReview = aiReview;
       await sendTradeAlert(signal);
-      console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: ${signal.action} $${signal.entry.toFixed(2)} [Điểm: ${signal.score || 'N/A'}] qua Telegram!\n`);
+      console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: [${snapshot.displayName}] ${signal.action} $${signal.entry.toFixed(2)} [Điểm: ${signal.score || 'N/A'}] qua Telegram!\n`);
     }
   }
 }
 
 /**
- * Bản tin tổng hợp thị trường định kỳ
+ * Quét toàn bộ danh mục tài sản đã cấu hình
  */
-async function runMarketBriefing() {
-  console.log('\n📊 Đang tạo bản tin thị trường định kỳ bằng AI...');
-  const marketData = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 14);
-  if (!marketData || marketData.closes.length < 50) return;
+async function scanMarket(targetSymbol = null) {
+  const symbolsToScan = targetSymbol ? [targetSymbol] : (CONFIG.symbols || [CONFIG.symbol]);
+  for (const sym of symbolsToScan) {
+    try {
+      await scanSingleSymbol(sym);
+    } catch (err) {
+      console.error(`❌ [ScanMarket] Lỗi khi quét ${sym}:`, err.message);
+    }
+  }
+}
 
-  const snapshot = createMarketSnapshot(marketData);
-  const digest = await generateMarketDigest(snapshot);
+/**
+ * Bản tin tổng hợp thị trường định kỳ cho từng tài sản
+ */
+async function runMarketBriefing(targetSymbol = null) {
+  const symbolsToBrief = targetSymbol ? [targetSymbol] : (CONFIG.symbols || [CONFIG.symbol]);
+  for (const sym of symbolsToBrief) {
+    try {
+      console.log(`\n📊 Đang tạo bản tin thị trường định kỳ bằng AI cho ${sym}...`);
+      const marketData = await fetchCandles(sym, CONFIG.timeframe, 14);
+      if (!marketData || marketData.closes.length < 50) continue;
 
-  if (digest) {
-    await sendMarketDigest(digest);
-    console.log('✅ Đã gửi bản tin thị trường định kỳ qua Telegram.');
+      const snapshot = createMarketSnapshot(marketData);
+      const digest = await generateMarketDigest(snapshot);
+
+      if (digest) {
+        digest.symbol = sym;
+        digest.displayName = snapshot.displayName || sym;
+        await sendMarketDigest(digest);
+        console.log(`✅ Đã gửi bản tin thị trường định kỳ (${sym}) qua Telegram.`);
+      }
+    } catch (err) {
+      console.error(`❌ [Briefing] Lỗi khi tạo bản tin ${sym}:`, err.message);
+    }
   }
 }
 
 module.exports = {
   scanMarket,
+  scanSingleSymbol,
   runMarketBriefing,
+  renderScoreBar,
 };

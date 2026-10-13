@@ -15,12 +15,20 @@ function parseGeminiKeys() {
 
 const geminiApiKeys = parseGeminiKeys();
 
+const rawSymbols = process.env.SYMBOLS || process.env.SYMBOL || 'XAU/USD';
+const parsedSymbols = rawSymbols.split(',').map((s) => s.trim()).filter(Boolean);
+
 const CONFIG = {
-  // Cấu hình thị trường
-  symbol: process.env.SYMBOL || 'XAU/USD',
+  // Cấu hình thị trường & Nguồn dữ liệu (Hỗ trợ đa tài sản Vàng & Crypto)
+  symbols: parsedSymbols.length > 0 ? parsedSymbols : ['XAU/USD'],
+  symbol: parsedSymbols[0] || 'XAU/USD',
   timeframe: process.env.TIMEFRAME || '15m',
   higherTimeframe: process.env.HIGHER_TIMEFRAME || '1h',
   cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *',
+  minConfluenceScore: parseInt(process.env.MIN_CONFLUENCE_SCORE || '65', 10),
+  marketDataSource: (process.env.MARKET_DATA_SOURCE || 'TRADINGVIEW').toUpperCase(),
+  tradingViewSymbol: process.env.TRADINGVIEW_SYMBOL || 'OANDA:XAUUSD',
+  priceOffset: parseFloat(process.env.PRICE_OFFSET || '0'),
 
   // Cấu hình Telegram
   telegramToken: process.env.TELEGRAM_BOT_TOKEN,

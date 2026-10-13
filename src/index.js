@@ -2,29 +2,41 @@ const cron = require('node-cron');
 const express = require('express');
 const CONFIG = require('./config');
 const { scanMarket, runMarketBriefing } = require('./botEngine');
+const { strategies } = require('./strategies');
 
-function startBot() {
+async function startBot() {
+  const isOnce = process.argv.includes('--once');
+  const symbolsList = (CONFIG.symbols && CONFIG.symbols.length > 0) ? CONFIG.symbols.join(', ') : CONFIG.symbol;
+
   console.log('====================================================');
-  console.log('🚀 HỆ THỐNG PHÂN TÍCH VÀ GIAO DỊCH VÀNG FOREX TỰ ĐỘNG');
-  console.log(`📊 Cặp giao dịch: ${CONFIG.symbol} | Khung thời gian: ${CONFIG.timeframe}`);
+  console.log('🚀 HỆ THỐNG PHÂN TÍCH VÀ GIAO DỊCH VÀNG & CRYPTO TỰ ĐỘNG');
+  console.log(`📊 Danh mục tài sản: ${symbolsList} | Khung thời gian: ${CONFIG.timeframe}`);
+  console.log(`📡 Nguồn dữ liệu nến: ${CONFIG.marketDataSource} (${CONFIG.marketDataSource === 'TRADINGVIEW' ? CONFIG.tradingViewSymbol : 'Spot Binance'})`);
   const keyCount = CONFIG.geminiApiKeys ? CONFIG.geminiApiKeys.length : (CONFIG.geminiApiKey ? 1 : 0);
   const aiStatus = keyCount > 0 
     ? `BẬT (${keyCount} API Key trong pool | Model: ${CONFIG.geminiModel})` 
     : 'TẮT (Chế độ Kỹ thuật thuần)';
   console.log(`🤖 Trợ lý AI (Gemini): ${aiStatus}`);
-  console.log('📈 Chiến lược kích hoạt:');
-  console.log('   1. Trend Following (EMA Ribbon + MACD + RSI)');
-  console.log('   2. Mean Reversion (Bollinger Bands + RSI Extremes)');
-  console.log('   3. Volatility Breakout (Donchian Range + ATR Expansion)');
-  console.log('   4. SMC Lite (Fair Value Gap + Order Block Retest)');
+  console.log(`📈 Chiến lược kích hoạt (${strategies.length}):`);
+  strategies.forEach((s, idx) => {
+    console.log(`   ${idx + 1}. ${s.name}`);
+  });
   console.log('====================================================');
+
+  // Chế độ quét một lần (--once)
+  if (isOnce) {
+    console.log('\n⚡ Chế độ kiểm tra nhanh (--once): Đang tiến hành quét 1 lượt rồi thoát...');
+    await scanMarket();
+    console.log('✅ Hoàn tất lượt quét một lần. Tạm biệt!');
+    process.exit(0);
+  }
 
   // Khởi chạy Web Server giả (Dummy Server) để giữ bot sống trên nền tảng Free (Render)
   const app = express();
   const PORT = process.env.PORT || 3000;
   
   app.get('/', (req, res) => {
-    res.send('🟢 Gold Trading Bot đang hoạt động bình thường 24/7!');
+    res.send('🟢 Trading Bot (Gold & Crypto) đang hoạt động bình thường 24/7!');
   });
   
   app.get('/ping', (req, res) => {
@@ -36,7 +48,7 @@ function startBot() {
   });
 
   // Chạy quét ngay lập tức khi khởi động
-  scanMarket();
+  await scanMarket();
 
   // Đặt lịch quét định kỳ theo CRON
   cron.schedule(CONFIG.cronSchedule, () => {
@@ -65,4 +77,3 @@ if (require.main === module) {
 }
 
 module.exports = { startBot };
-

@@ -85,6 +85,11 @@ class BaseStrategy {
 
     const currentMfi = mfiResult.length > 0 ? mfiResult[mfiResult.length - 1] : 50;
 
+    const lastCandle = data.candles && data.candles.length > 0 ? data.candles[data.candles.length - 1] : null;
+    const prevCandle = data.candles && data.candles.length > 1 ? data.candles[data.candles.length - 2] : null;
+    const currentDelta = lastCandle ? (lastCandle.delta || 0) : 0;
+    const prevDelta = prevCandle ? (prevCandle.delta || 0) : 0;
+
     return {
       currentPrice,
       ema20: ema20[ema20.length - 1],
@@ -108,10 +113,16 @@ class BaseStrategy {
       mfi: currentMfi,
       currentVolume,
       avgVolume20,
+      volSma20: avgVolume20,
+      volRatio: avgVolume20 > 0 ? currentVolume / avgVolume20 : 1,
+      delta: currentDelta,
+      prevDelta,
+      deltas: data.deltas || [],
       closes,
       highs,
       lows,
       volumes,
+      candles: data.candles || [],
     };
   }
 
@@ -274,6 +285,13 @@ class BaseStrategy {
     if (avgVolume20 > 0 && currentVolume >= 1.4 * avgVolume20) {
       score += 5;
       breakdown.push(`Volume đột biến: +5đ`);
+    }
+
+    // Thuận Order Flow Delta
+    const delta = indicators.delta || 0;
+    if ((signal.action === 'BUY' && delta > 0) || (signal.action === 'SELL' && delta < 0)) {
+      score += 5;
+      breakdown.push(`Thuận Order Flow Delta (${delta > 0 ? '+' : ''}${delta.toFixed(1)}): +5đ`);
     }
 
     // Tỷ lệ R:R

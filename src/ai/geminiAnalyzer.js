@@ -172,10 +172,14 @@ async function generateWithKeyPool(prompt) {
 
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const response = await candidate.client.models.generateContent({
+          const callPromise = candidate.client.models.generateContent({
             model: modelName,
             contents: prompt,
           });
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout quá 6s khi gọi Gemini model ${modelName}`)), 6000)
+          );
+          const response = await Promise.race([callPromise, timeoutPromise]);
           const text = response.text ? response.text.trim() : (response.candidates?.[0]?.content?.parts?.[0]?.text || '');
           if (text) {
             keyPool.markSuccess(candidate.index);
@@ -189,6 +193,7 @@ async function generateWithKeyPool(prompt) {
         } catch (err) {
           lastError = err;
           const errMsg = err.message || '';
+          const isTimeout = errMsg.includes('Timeout');
           const isRateLimit = err.status === 429 ||
             errMsg.includes('429') ||
             errMsg.toLowerCase().includes('resource_exhausted') ||
@@ -206,9 +211,12 @@ async function generateWithKeyPool(prompt) {
             keyPool.markRateLimited(candidate.index, 60000);
             keyHitRateLimit = true;
             break; // Thoát vòng lặp attempt để chuyển key
+          } else if (isTimeout) {
+            console.warn(`⚠️ [AI] Model ${modelName} bị quá hạn 6s. Đang chuyển sang model dự phòng tiếp theo...`);
+            break; // Không retry cùng model khi đã timeout
           } else if (isDemandSpike) {
-            console.warn(`⚠️ [AI] Model ${modelName} gặp spike tải (${err.status || 503}) với Key #${candidate.index} (${candidate.masked}), đang thử lại...`);
-            await new Promise((resolve) => setTimeout(resolve, 1500));
+            console.warn(`⚠️ [AI] Model ${modelName} gặp spike tải (${err.status || 503}) với Key #${candidate.index} (${candidate.masked}), đang chuyển sang model tiếp theo...`);
+            break; // Chuyển sang model dự phòng ngay lập tức
           } else {
             // Lỗi khác (ví dụ 404 model not found) thì chuyển sang model kế tiếp
             break;

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.20.0",
+    "@mathieuc/tradingview": "^3.5.2",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
