@@ -44,6 +44,10 @@ const CONFIG = {
 
   // Cấu hình Quản lý Rủi ro & Ngưỡng điểm chiến lược
   minStrategyScore: parseInt(process.env.MIN_STRATEGY_SCORE || '70', 10),
+  // Không phát lại tín hiệu cùng chiều trên cùng tài sản trong N nến kể từ lần gửi trước
+  signalCooldownBars: parseInt(process.env.SIGNAL_COOLDOWN_BARS || '4', 10),
+  // Giờ UTC bắt đầu phiên để reset VWAP (0 = 00:00 UTC; Forex/Vàng có thể dùng 22)
+  vwapSessionUtcHour: parseInt(process.env.VWAP_SESSION_UTC_HOUR || '0', 10),
   riskRewardMin: 1.5,
   atrMultiplierSl: 1.5,
   atrMultiplierTp: 3.0,

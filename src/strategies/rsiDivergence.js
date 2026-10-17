@@ -5,7 +5,7 @@ class RsiDivergenceStrategy extends BaseStrategy {
     super(
       'RSI Divergence (Regular Divergence + Price Action Reversal)',
       'Chiến lược phát hiện phân kỳ đỉnh/đáy giữa giá và RSI kết hợp nến đảo chiều cho tỷ lệ R:R cao',
-      80,
+      50,
       'DIVERGENCE'
     );
   }
@@ -15,9 +15,9 @@ class RsiDivergenceStrategy extends BaseStrategy {
 
     const ind = this.calculateIndicators(marketData);
     const { currentPrice, rsiSeries, atr, closes, highs, lows, ema200, adx } = ind;
-    if (!rsiSeries || rsiSeries.length < 35) return null;
+    if (!rsiSeries || rsiSeries.length < 40) return null;
 
-    // Phát hiện phân kỳ thường giữa 2 vùng đỉnh/đáy gần nhất
+    // Phát hiện phân kỳ thường giữa 2 đáy/đỉnh swing gần nhất
     const divergence = this.detectRsiDivergence(closes, highs, lows, rsiSeries);
     if (!divergence) return null;
 
@@ -56,36 +56,23 @@ class RsiDivergenceStrategy extends BaseStrategy {
 
     if (!action) return null;
 
-    const risk = Math.abs(currentPrice - stopLoss);
-    if (risk === 0) return null;
-
-    const reward1 = Math.abs(takeProfit - currentPrice);
-    const reward2 = Math.abs(takeProfit2 - currentPrice);
-
-    const signal = {
-      strategy: this.name,
+    // buildSignal tự loại lệnh có R:R dưới CONFIG.riskRewardMin
+    return this.buildSignal({
       action,
       entry: currentPrice,
       stopLoss,
       takeProfit,
       takeProfit2,
-      rrRatio: `1 : ${(reward1 / risk).toFixed(1)} (TP1) / 1 : ${(reward2 / risk).toFixed(1)} (TP2)`,
       indicators: {
         currentPrice,
         atr,
         adx,
         divergenceType: divergence.name,
         divergenceDetail: divergence.desc,
-        candlePattern: pattern.isHammer ? 'Hammer/Pinbar' : (pattern.isBullishEngulfing ? 'Bullish Engulfing' : (pattern.isShootingStar ? 'Shooting Star' : (pattern.isBearishEngulfing ? 'Bearish Engulfing' : 'Reversal Candle'))),
+        candlePattern: this.describeCandlePattern(pattern, action),
         ema200,
       },
-    };
-
-    const scoreData = this.evaluateScore(signal, ind);
-    return {
-      ...signal,
-      ...scoreData,
-    };
+    }, ind);
   }
 }
 

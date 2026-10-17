@@ -12,7 +12,7 @@ function buildValidationPrompt(signal, marketSnapshot) {
   return `
 Bạn là một Giám đốc Quản trị Rủi ro và Chuyên gia Phân tích Định lượng (Senior Forex/Gold Quant Trader) hàng đầu thị trường tài chính quốc tế.
 
-Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch Vàng (Gold - GC=F) vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep, Fakeout) và tối đa hóa xác suất chiến thắng.
+Nhiệm vụ của bạn: Thẩm định một tín hiệu giao dịch ${signal.displayName || signal.symbol || 'Vàng (XAU/USD)'} vừa được phát hiện bởi thuật toán phân tích kỹ thuật, nhằm LỌC BỎ các bẫy giá (Bull/Bear Trap, Liquidity Sweep, Fakeout) và tối đa hóa xác suất chiến thắng.
 
 THÔNG TIN TÍN HIỆU CẦN THẨM ĐỊNH:
 - Chiến lược phát hiện: ${signal.strategy}${scoreInfo}${breakdownInfo}${confluenceInfo}

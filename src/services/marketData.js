@@ -223,6 +223,7 @@ async function fetchTradingViewCandles(symbol = 'OANDA:XAUUSD', interval = '15m'
             deltas,
             candles,
             isRealtime: true,
+            hasRealDelta: false, // Delta ước tính từ thân nến, không phải taker volume thật
             source: `TradingView (${tvSymbol})`,
           });
         }
@@ -334,6 +335,7 @@ async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', 
         deltas,
         candles,
         isRealtime: true,
+        hasRealDelta: true, // Delta từ Taker Buy/Sell Volume thật
         source: `Binance Spot (${binanceSymbol})`,
       };
     } catch (err) {
@@ -398,7 +400,7 @@ async function fetchGateIoSpotGold(interval = '15m', limit = 500) {
     });
   });
 
-  return { closes, highs, lows, opens, volumes, candles, isRealtime: true, source: 'Gate.io Spot (PAXG/USDT)' };
+  return { closes, highs, lows, opens, volumes, candles, isRealtime: true, hasRealDelta: false, source: 'Gate.io Spot (PAXG/USDT)' };
 }
 
 /**
@@ -466,6 +468,7 @@ async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 1
     deltas,
     candles,
     isRealtime: false,
+    hasRealDelta: false,
     source: `Yahoo Finance (${symbol})`,
   };
 }
@@ -496,7 +499,7 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
   // Chiến lược 1: Ưu tiên TradingView Direct Datafeed
   if (sourcePreference === 'TRADINGVIEW') {
     try {
-      const data = await fetchTradingViewCandles(resolved.tradingViewSymbol, interval, 250);
+      const data = await fetchTradingViewCandles(resolved.tradingViewSymbol, interval, 500);
       data.symbol = resolved.rawSymbol;
       data.displayName = resolved.displayName;
       cache.set(cacheKey, { timestamp: now, data });
@@ -542,6 +545,34 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
 }
 
 /**
+ * Đổi khung thời gian ('15m', '1h', '4h', '1d') sang mili-giây
+ */
+function timeframeToMs(tf = '15m') {
+  const match = /^(\d+)([mhdw])$/i.exec(String(tf).trim());
+  if (!match) return 15 * 60 * 1000;
+  const unitMs = { m: 60e3, h: 3600e3, d: 86400e3, w: 604800e3 }[match[2].toLowerCase()];
+  return parseInt(match[1], 10) * unitMs;
+}
+
+/**
+ * Bỏ nến cuối nếu nến đó chưa đóng (thời điểm mở + khung thời gian > hiện tại)
+ * để chiến lược không phân tích nến đang chạy (tránh tín hiệu bị vẽ lại / repaint)
+ */
+function getClosedCandles(data, interval = '15m', now = Date.now()) {
+  const candles = data && data.candles;
+  const last = candles && candles[candles.length - 1];
+  if (!last || !last.date || new Date(last.date).getTime() + timeframeToMs(interval) <= now) {
+    return data;
+  }
+
+  const trimmed = { ...data };
+  for (const key of ['closes', 'highs', 'lows', 'opens', 'volumes', 'buyVolumes', 'sellVolumes', 'deltas', 'candles']) {
+    if (Array.isArray(data[key])) trimmed[key] = data[key].slice(0, -1);
+  }
+  return trimmed;
+}
+
+/**
  * Lấy dữ liệu đa khung thời gian
  */
 async function fetchMultiTimeframeCandles(symbol = 'XAU/USD', primaryTf = '15m', higherTf = '1h') {
@@ -565,4 +596,6 @@ module.exports = {
   fetchYahooCandles,
   resolveSymbolSources,
   resolveTradingViewSymbol,
+  timeframeToMs,
+  getClosedCandles,
 };

@@ -5,7 +5,7 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
     super(
       'Smart Money Flow (VWAP + ADX + MFI Volume Confirmation)',
       'Chiến lược bám theo dòng tiền tổ chức tại vùng giá trị VWAP kết hợp xung lực ADX và chỉ số dòng tiền MFI',
-      90,
+      50,
       'FLOW'
     );
   }
@@ -16,7 +16,7 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
     const ind = this.calculateIndicators(marketData);
     const { currentPrice, vwap, mfi, adx, pdi, mdi, atr, ema20, ema50, ema200, currentVolume, avgVolume20 } = ind;
 
-    // Yêu cầu có dữ liệu VWAP hợp lệ từ sàn giao dịch
+    // Yêu cầu có dữ liệu VWAP phiên hợp lệ (cần volume)
     if (!vwap || isNaN(vwap)) return null;
 
     // Yêu cầu thị trường có xu hướng rõ rệt: ADX >= 22
@@ -72,17 +72,12 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
     const risk = Math.abs(currentPrice - stopLoss);
     if (risk === 0 || risk < 0.2 * atr) return null;
 
-    const reward1 = Math.abs(takeProfit - currentPrice);
-    const reward2 = Math.abs(takeProfit2 - currentPrice);
-
-    const signal = {
-      strategy: this.name,
+    return this.buildSignal({
       action,
       entry: currentPrice,
       stopLoss,
       takeProfit,
       takeProfit2,
-      rrRatio: `1 : ${(reward1 / risk).toFixed(1)} / 1 : ${(reward2 / risk).toFixed(1)}`,
       indicators: {
         currentPrice,
         vwap,
@@ -92,13 +87,7 @@ class VolumeVwapAdxStrategy extends BaseStrategy {
         ema50,
         volumeRatio: avgVolume20 > 0 ? `${(currentVolume / avgVolume20).toFixed(1)}x` : 'N/A',
       },
-    };
-
-    const scoreData = this.evaluateScore(signal, ind);
-    return {
-      ...signal,
-      ...scoreData,
-    };
+    }, ind);
   }
 }
 

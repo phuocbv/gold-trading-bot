@@ -1,3 +1,4 @@
+const BaseStrategy = require('./baseStrategy');
 const TrendFollowingStrategy = require('./trendFollowing');
 const MeanReversionStrategy = require('./meanReversion');
 const BreakoutAtrStrategy = require('./breakoutAtr');
@@ -18,10 +19,11 @@ const strategies = [
 
 /**
  * Chạy tất cả các chiến lược trên tập dữ liệu nến hiện tại và tính toán hợp lưu & xếp hạng
- * @param {object} marketData
+ * @param {object} marketData - Dữ liệu nến (chỉ gồm các nến đã đóng)
+ * @param {object} [options] - { silent: true } để tắt log (dùng cho backtest)
  * @returns {Array<object>} Danh sách các tín hiệu đã được chấm điểm, xếp hạng và sắp xếp từ cao xuống thấp
  */
-function evaluateAllStrategies(marketData) {
+function evaluateAllStrategies(marketData, options = {}) {
   const rawSignals = [];
 
   for (const strat of strategies) {
@@ -41,17 +43,12 @@ function evaluateAllStrategies(marketData) {
   const buySignals = rawSignals.filter((s) => s.action === 'BUY');
   const sellSignals = rawSignals.filter((s) => s.action === 'SELL');
 
-  // Cảnh báo nếu có xung đột đối nghịch (Vừa có BUY vừa có SELL)
+  // Xung đột đối nghịch (vừa có BUY vừa có SELL trên cùng nến): thị trường giằng co, bỏ qua cả hai chiều
   if (buySignals.length > 0 && sellSignals.length > 0) {
-    console.warn(`⚠️ [Xung đột tín hiệu]: Phát hiện ${buySignals.length} BUY và ${sellSignals.length} SELL đồng thời! Đang chiết khấu điểm do thị trường giằng co.`);
-    buySignals.forEach((s) => {
-      s.score = Math.max(0, s.score - 15);
-      if (s.breakdown) s.breakdown.push(`Trừ điểm xung đột đối kháng: -15đ`);
-    });
-    sellSignals.forEach((s) => {
-      s.score = Math.max(0, s.score - 15);
-      if (s.breakdown) s.breakdown.push(`Trừ điểm xung đột đối kháng: -15đ`);
-    });
+    if (!options.silent) {
+      console.warn(`⚠️ [Xung đột tín hiệu]: Phát hiện ${buySignals.length} BUY và ${sellSignals.length} SELL đồng thời! Bỏ qua cả hai chiều do thị trường giằng co.`);
+    }
+    return [];
   }
 
   const processedSignals = [];
@@ -73,15 +70,7 @@ function evaluateAllStrategies(marketData) {
     const confluenceBonus = Math.min(20, (group.length - 1) * 10); // +10đ cho mỗi chiến lược đồng thuận thêm
     const combinedScore = Math.min(100, primary.score + confluenceBonus);
 
-    let rank = 'B';
-    let rankBadge = '⭐⭐⭐ [Hạng B - Đạt chuẩn]';
-    if (combinedScore >= 90) {
-      rank = 'S';
-      rankBadge = '⭐⭐⭐⭐⭐ [Hạng S - Hợp lưu Siêu cấp]';
-    } else if (combinedScore >= 80) {
-      rank = 'A';
-      rankBadge = '⭐⭐⭐⭐ [Hạng A - Uy tín cao]';
-    }
+    const { rank, rankBadge } = BaseStrategy.rankFor(combinedScore, true);
 
     const mergedBreakdown = [
       ...(primary.breakdown || []),

@@ -1,17 +1,70 @@
-const { EMA, RSI, ATR, MACD, BollingerBands, ADX, StochasticRSI, VWAP, MFI } = require('technicalindicators');
+const { EMA, RSI, ATR, MACD, BollingerBands, ADX, StochasticRSI, MFI } = require('technicalindicators');
+const CONFIG = require('../config');
+
+// Nhóm chiến lược theo pha thị trường phù hợp (dùng cho chấm điểm và ngưỡng R:R)
+const TREND_TYPES = ['TREND', 'FLOW', 'BREAKOUT', 'SMC'];
+
+// Cache chỉ báo theo từng bộ dữ liệu nến để các chiến lược không tính lại cùng một thứ
+const indicatorCache = new WeakMap();
+
+/**
+ * VWAP neo theo phiên: reset mỗi ngày tại CONFIG.vwapSessionUtcHour (UTC)
+ * thay vì cộng dồn từ nến đầu tiên của dữ liệu tải về (mốc neo sẽ trôi theo mỗi lần tải)
+ */
+function calculateSessionVwap(candles) {
+  const sessionOffsetMs = (CONFIG.vwapSessionUtcHour || 0) * 3600 * 1000;
+  const result = [];
+  let session = null;
+  let cumulativePv = 0;
+  let cumulativeVolume = 0;
+
+  for (const c of candles) {
+    const time = c.date ? new Date(c.date).getTime() : NaN;
+    const candleSession = Number.isNaN(time) ? session : Math.floor((time - sessionOffsetMs) / 86400000);
+    if (candleSession !== session) {
+      session = candleSession;
+      cumulativePv = 0;
+      cumulativeVolume = 0;
+    }
+    const volume = c.volume || 0;
+    cumulativePv += ((c.high + c.low + c.close) / 3) * volume;
+    cumulativeVolume += volume;
+    result.push(cumulativeVolume > 0 ? cumulativePv / cumulativeVolume : null);
+  }
+  return result;
+}
 
 class BaseStrategy {
-  constructor(name, description, baseWeight = 75, strategyType = 'TREND') {
+  constructor(name, description, baseWeight = 50, strategyType = 'TREND') {
     this.name = name;
     this.description = description;
     this.baseWeight = baseWeight;
     this.strategyType = strategyType;
   }
 
+  get isTrendType() {
+    return TREND_TYPES.includes(this.strategyType);
+  }
+
+  /**
+   * Xếp hạng tín hiệu theo điểm số (dùng chung cho mọi chiến lược và tín hiệu hợp lưu)
+   */
+  static rankFor(score, isConfluence = false) {
+    if (score >= 90) {
+      return { rank: 'S', rankBadge: isConfluence ? '⭐⭐⭐⭐⭐ [Hạng S - Hợp lưu Siêu cấp]' : '⭐⭐⭐⭐⭐ [Hạng S - Rất mạnh]' };
+    }
+    if (score >= 80) {
+      return { rank: 'A', rankBadge: '⭐⭐⭐⭐ [Hạng A - Uy tín cao]' };
+    }
+    return { rank: 'B', rankBadge: '⭐⭐⭐ [Hạng B - Đạt chuẩn]' };
+  }
+
   /**
    * Tính toán các chỉ báo kỹ thuật mở rộng
    */
   calculateIndicators(data) {
+    if (indicatorCache.has(data)) return indicatorCache.get(data);
+
     const { closes, highs, lows, volumes } = data;
 
     const ema20 = EMA.calculate({ period: 20, values: closes });
@@ -51,16 +104,16 @@ class BaseStrategy {
       }) || [];
     } catch (e) {}
 
-    // 3. VWAP & MFI (Dòng tiền và Khối lượng giao dịch)
+    // 3. VWAP theo phiên & MFI (Dòng tiền và Khối lượng giao dịch)
     const hasValidVolume = volumes && volumes.some((v) => v > 0);
     let vwapResult = [];
     let mfiResult = [];
     let avgVolume20 = 0;
 
     if (hasValidVolume) {
-      try {
-        vwapResult = VWAP.calculate({ high: highs, low: lows, close: closes, volume: volumes }) || [];
-      } catch (e) {}
+      if (data.candles && data.candles.length === closes.length) {
+        vwapResult = calculateSessionVwap(data.candles);
+      }
       try {
         mfiResult = MFI.calculate({ high: highs, low: lows, close: closes, volume: volumes, period: 14 }) || [];
       } catch (e) {}
@@ -79,18 +132,20 @@ class BaseStrategy {
     const lastStoch = stochRsiResult.length > 0 ? stochRsiResult[stochRsiResult.length - 1] : null;
     const prevStoch = stochRsiResult.length > 1 ? stochRsiResult[stochRsiResult.length - 2] : null;
 
-    const currentVwap = vwapResult.length > 0 && !isNaN(vwapResult[vwapResult.length - 1])
-      ? vwapResult[vwapResult.length - 1]
-      : null;
+    const lastVwap = vwapResult.length > 0 ? vwapResult[vwapResult.length - 1] : null;
+    const currentVwap = lastVwap != null && !isNaN(lastVwap) ? lastVwap : null;
 
     const currentMfi = mfiResult.length > 0 ? mfiResult[mfiResult.length - 1] : 50;
 
+    // Delta chỉ có ý nghĩa khi nguồn cung cấp taker volume thật (Binance).
+    // Delta ước tính từ thân nến (TradingView/Yahoo) luôn cùng dấu với màu nến nên bị bỏ qua.
+    const hasRealDelta = data.hasRealDelta === true;
     const lastCandle = data.candles && data.candles.length > 0 ? data.candles[data.candles.length - 1] : null;
     const prevCandle = data.candles && data.candles.length > 1 ? data.candles[data.candles.length - 2] : null;
-    const currentDelta = lastCandle ? (lastCandle.delta || 0) : 0;
-    const prevDelta = prevCandle ? (prevCandle.delta || 0) : 0;
+    const currentDelta = hasRealDelta && lastCandle ? (lastCandle.delta || 0) : 0;
+    const prevDelta = hasRealDelta && prevCandle ? (prevCandle.delta || 0) : 0;
 
-    return {
+    const indicators = {
       currentPrice,
       ema20: ema20[ema20.length - 1],
       ema50: ema50[ema50.length - 1],
@@ -115,15 +170,18 @@ class BaseStrategy {
       avgVolume20,
       volSma20: avgVolume20,
       volRatio: avgVolume20 > 0 ? currentVolume / avgVolume20 : 1,
+      hasRealDelta,
       delta: currentDelta,
       prevDelta,
-      deltas: data.deltas || [],
       closes,
       highs,
       lows,
       volumes,
       candles: data.candles || [],
     };
+
+    indicatorCache.set(data, indicators);
+    return indicators;
   }
 
   /**
@@ -166,135 +224,152 @@ class BaseStrategy {
   }
 
   /**
-   * Phát hiện Phân kỳ RSI (RSI Regular Divergence)
+   * Tên mô hình nến cùng chiều lệnh, null nếu không có mô hình thật sự
    */
-  detectRsiDivergence(closes, highs, lows, rsi) {
-    if (!rsi || rsi.length < 35 || closes.length < 35) return null;
+  describeCandlePattern(pattern, action) {
+    if (action === 'BUY') {
+      if (pattern.isBullishEngulfing) return 'Bullish Engulfing';
+      if (pattern.isHammer) return 'Hammer/Pinbar';
+    } else if (action === 'SELL') {
+      if (pattern.isBearishEngulfing) return 'Bearish Engulfing';
+      if (pattern.isShootingStar) return 'Shooting Star';
+    }
+    return null;
+  }
+
+  /**
+   * Tìm các đỉnh/đáy swing (pivot) trong `lookback` nến gần nhất, mới nhất đứng trước.
+   * Pivot cần `left` nến bên trái và `right` nến bên phải xác nhận.
+   */
+  findPivots(series, isLow, { left = 3, right = 1, lookback = 40 } = {}) {
+    const pivots = [];
+    const len = series.length;
+    for (let i = len - 1 - right; i >= Math.max(left, len - lookback); i--) {
+      let isPivot = true;
+      for (let k = 1; k <= left && isPivot; k++) {
+        isPivot = isLow ? series[i] < series[i - k] : series[i] > series[i - k];
+      }
+      for (let k = 1; k <= right && isPivot; k++) {
+        isPivot = isLow ? series[i] <= series[i + k] : series[i] >= series[i + k];
+      }
+      if (isPivot) pivots.push(i);
+    }
+    return pivots;
+  }
+
+  /**
+   * Phát hiện Phân kỳ RSI thường (Regular Divergence) giữa 2 đáy/đỉnh swing gần nhất.
+   * Đáy/đỉnh thứ 2 phải vừa hình thành (trong `maxAge` nến) và cách đáy/đỉnh thứ 1 tối thiểu `minGap` nến.
+   */
+  detectRsiDivergence(closes, highs, lows, rsi, { maxAge = 6, minGap = 5 } = {}) {
+    if (!rsi || rsi.length < 40 || closes.length < 40) return null;
 
     const offset = closes.length - rsi.length;
     const len = closes.length;
 
-    // So sánh 2 cửa sổ swing: Window 1 (nến -28 đến -13) và Window 2 (nến -12 đến -1)
-    const w1Start = len - 28;
-    const w1End = len - 13;
-    const w2Start = len - 12;
-    const w2End = len - 1;
-
-    let minPrice1 = Infinity, minIdx1 = -1;
-    let maxPrice1 = -Infinity, maxIdx1 = -1;
-    for (let i = w1Start; i <= w1End; i++) {
-      if (lows[i] < minPrice1) { minPrice1 = lows[i]; minIdx1 = i; }
-      if (highs[i] > maxPrice1) { maxPrice1 = highs[i]; maxIdx1 = i; }
-    }
-
-    let minPrice2 = Infinity, minIdx2 = -1;
-    let maxPrice2 = -Infinity, maxIdx2 = -1;
-    for (let i = w2Start; i <= w2End; i++) {
-      if (lows[i] < minPrice2) { minPrice2 = lows[i]; minIdx2 = i; }
-      if (highs[i] > maxPrice2) { maxPrice2 = highs[i]; maxIdx2 = i; }
-    }
-
-    const rsiAtMin1 = rsi[minIdx1 - offset];
-    const rsiAtMin2 = rsi[minIdx2 - offset];
-    const rsiAtMax1 = rsi[maxIdx1 - offset];
-    const rsiAtMax2 = rsi[maxIdx2 - offset];
+    const pickPair = (pivots) => {
+      const recent = pivots[0];
+      if (recent == null || len - 1 - recent > maxAge) return null;
+      const earlier = pivots.find((p) => recent - p >= minGap);
+      return earlier == null ? null : [earlier, recent];
+    };
 
     // Phân kỳ dương: Giá tạo đáy thấp hơn (Lower Low), nhưng RSI tạo đáy cao hơn (Higher Low)
-    if (minPrice2 < minPrice1 && rsiAtMin2 > (rsiAtMin1 + 2.0) && rsiAtMin2 < 48) {
-      return {
-        type: 'BULLISH',
-        name: 'Bullish RSI Divergence',
-        desc: `Đáy giá thấp hơn ($${minPrice2.toFixed(1)} < $${minPrice1.toFixed(1)}) nhưng RSI tăng (${rsiAtMin2.toFixed(1)} > ${rsiAtMin1.toFixed(1)})`,
-        price1: minPrice1,
-        price2: minPrice2,
-        rsi1: rsiAtMin1,
-        rsi2: rsiAtMin2,
-      };
+    const lowPair = pickPair(this.findPivots(lows, true));
+    if (lowPair) {
+      const [i1, i2] = lowPair;
+      const rsi1 = rsi[i1 - offset];
+      const rsi2 = rsi[i2 - offset];
+      if (lows[i2] < lows[i1] && rsi2 > rsi1 + 2.0 && rsi2 < 50) {
+        return {
+          type: 'BULLISH',
+          name: 'Bullish RSI Divergence',
+          desc: `Đáy giá thấp hơn ($${lows[i2].toFixed(1)} < $${lows[i1].toFixed(1)}) nhưng RSI tăng (${rsi2.toFixed(1)} > ${rsi1.toFixed(1)})`,
+          price1: lows[i1],
+          price2: lows[i2],
+          rsi1,
+          rsi2,
+        };
+      }
     }
 
     // Phân kỳ âm: Giá tạo đỉnh cao hơn (Higher High), nhưng RSI tạo đỉnh thấp hơn (Lower High)
-    if (maxPrice2 > maxPrice1 && rsiAtMax2 < (rsiAtMax1 - 2.0) && rsiAtMax2 > 52) {
-      return {
-        type: 'BEARISH',
-        name: 'Bearish RSI Divergence',
-        desc: `Đỉnh giá cao hơn ($${maxPrice2.toFixed(1)} > $${maxPrice1.toFixed(1)}) nhưng RSI giảm (${rsiAtMax2.toFixed(1)} < ${rsiAtMax1.toFixed(1)})`,
-        price1: maxPrice1,
-        price2: maxPrice2,
-        rsi1: rsiAtMax1,
-        rsi2: rsiAtMax2,
-      };
+    const highPair = pickPair(this.findPivots(highs, false));
+    if (highPair) {
+      const [i1, i2] = highPair;
+      const rsi1 = rsi[i1 - offset];
+      const rsi2 = rsi[i2 - offset];
+      if (highs[i2] > highs[i1] && rsi2 < rsi1 - 2.0 && rsi2 > 50) {
+        return {
+          type: 'BEARISH',
+          name: 'Bearish RSI Divergence',
+          desc: `Đỉnh giá cao hơn ($${highs[i2].toFixed(1)} > $${highs[i1].toFixed(1)}) nhưng RSI giảm (${rsi2.toFixed(1)} < ${rsi1.toFixed(1)})`,
+          price1: highs[i1],
+          price2: highs[i2],
+          rsi1,
+          rsi2,
+        };
+      }
     }
 
     return null;
   }
 
   /**
-   * Tính toán điểm chất lượng và trọng số thực tế của tín hiệu dựa trên pha thị trường và các yếu tố xác nhận
+   * Tính điểm chất lượng tín hiệu (0 - 100) theo pha thị trường và các yếu tố xác nhận.
+   * Chỉ giữ các yếu tố đã được backtest cho thấy có cải thiện kết quả:
+   * pha ADX phù hợp, thuận EMA200, mô hình nến đảo chiều thật, Delta thật (chiến lược đảo chiều), R:R.
    * @param {object} signal - Tín hiệu thô do analyze() sinh ra
    * @param {object} indicators - Kết quả từ calculateIndicators
-   * @returns {object} { score, rank, rankBadge, regimeMultiplier, breakdown }
+   * @returns {object} { score, rank, rankBadge, breakdown }
    */
   evaluateScore(signal, indicators) {
     if (!signal || !indicators) return null;
 
-    const base = this.baseWeight;
-    let multiplier = 1.0;
-    const breakdown = [`Cơ sở: ${base}đ`];
+    let score = this.baseWeight;
+    const breakdown = [`Cơ sở: ${this.baseWeight}đ`];
+    const { adx, ema200, currentPrice, candles } = indicators;
+    const isBuy = signal.action === 'BUY';
 
-    const { adx, ema200, currentPrice, currentVolume, avgVolume20 } = indicators;
-
-    // 1. Hệ số thích ứng pha thị trường (Market Regime Multiplier theo ADX)
-    if (adx >= 22) {
-      if (['TREND', 'FLOW', 'BREAKOUT', 'SMC'].includes(this.strategyType)) {
-        multiplier = 1.15;
-        breakdown.push(`Trend mạnh (ADX ${adx.toFixed(1)}): x1.15`);
-      } else if (this.strategyType === 'REVERSION') {
-        multiplier = 0.6;
-        breakdown.push(`Trend mạnh cấm cản tàu (ADX ${adx.toFixed(1)}): x0.6`);
+    // 1. Pha thị trường theo ADX: chiến lược xu hướng cần trend mạnh, chiến lược đảo chiều cần thị trường đi ngang
+    if (this.isTrendType) {
+      if (adx >= 22) {
+        score += 10;
+        breakdown.push(`Trend mạnh phù hợp chiến lược (ADX ${adx.toFixed(1)}): +10đ`);
+      } else if (adx < 20) {
+        score -= 15;
+        breakdown.push(`Sideway làm yếu tín hiệu xu hướng (ADX ${adx.toFixed(1)}): -15đ`);
       }
     } else if (adx < 20) {
-      if (['REVERSION', 'DIVERGENCE'].includes(this.strategyType)) {
-        multiplier = 1.2;
-        breakdown.push(`Sideway lý tưởng (ADX ${adx.toFixed(1)}): x1.2`);
-      } else if (['BREAKOUT', 'TREND'].includes(this.strategyType)) {
-        multiplier = 0.7;
-        breakdown.push(`Sideway giảm hiệu lực trend (ADX ${adx.toFixed(1)}): x0.7`);
-      }
+      score += 10;
+      breakdown.push(`Sideway lý tưởng cho đảo chiều (ADX ${adx.toFixed(1)}): +10đ`);
+    } else if (adx >= 22) {
+      score -= 15;
+      breakdown.push(`Trend mạnh, đánh ngược dòng rủi ro (ADX ${adx.toFixed(1)}): -15đ`);
     }
 
-    let score = base * multiplier;
-
-    // 2. Điểm thưởng chất lượng Setup (Bonus Quality)
-    // Thuận xu hướng dài hạn EMA200
-    if (ema200 && currentPrice) {
-      const withEma200 = (signal.action === 'BUY' && currentPrice > ema200) ||
-                         (signal.action === 'SELL' && currentPrice < ema200);
-      if (withEma200) {
-        score += 5;
-        breakdown.push(`Thuận EMA200: +5đ`);
-      }
-    }
-
-    // Nến Price Action xác nhận
-    if (signal.indicators?.candlePattern || signal.indicators?.pattern) {
-      score += 6;
-      breakdown.push(`Mô hình nến xác nhận: +6đ`);
-    }
-
-    // Đột biến volume
-    if (avgVolume20 > 0 && currentVolume >= 1.4 * avgVolume20) {
+    // 2. Thuận xu hướng dài hạn EMA200
+    if (ema200 && currentPrice && ((isBuy && currentPrice > ema200) || (!isBuy && currentPrice < ema200))) {
       score += 5;
-      breakdown.push(`Volume đột biến: +5đ`);
+      breakdown.push('Thuận EMA200: +5đ');
     }
 
-    // Thuận Order Flow Delta
+    // 3. Mô hình nến đảo chiều thật sự (Pinbar / Engulfing) cùng chiều lệnh
+    const n = candles.length;
+    const patternName = this.describeCandlePattern(this.detectCandlePattern(candles[n - 2], candles[n - 1]), signal.action);
+    if (patternName) {
+      score += 8;
+      breakdown.push(`Mô hình nến xác nhận (${patternName}): +8đ`);
+    }
+
+    // 4. Delta Order Flow thật xác nhận phe chủ động đã đảo chiều (chỉ áp dụng cho chiến lược đảo chiều)
     const delta = indicators.delta || 0;
-    if ((signal.action === 'BUY' && delta > 0) || (signal.action === 'SELL' && delta < 0)) {
+    if (!this.isTrendType && indicators.hasRealDelta && ((isBuy && delta > 0) || (!isBuy && delta < 0))) {
       score += 5;
       breakdown.push(`Thuận Order Flow Delta (${delta > 0 ? '+' : ''}${delta.toFixed(1)}): +5đ`);
     }
 
-    // Tỷ lệ R:R
+    // 5. Tỷ lệ R:R
     const risk = Math.abs(signal.entry - signal.stopLoss);
     const reward = Math.abs(signal.takeProfit - signal.entry);
     if (risk > 0) {
@@ -311,22 +386,43 @@ class BaseStrategy {
     // Giới hạn điểm từ 0 đến 100
     score = Math.min(100, Math.max(0, Math.round(score)));
 
-    let rank = 'B';
-    let rankBadge = '⭐⭐⭐ [Hạng B - Đạt chuẩn]';
-    if (score >= 90) {
-      rank = 'S';
-      rankBadge = '⭐⭐⭐⭐⭐ [Hạng S - Rất mạnh]';
-    } else if (score >= 80) {
-      rank = 'A';
-      rankBadge = '⭐⭐⭐⭐ [Hạng A - Uy tín cao]';
-    }
-
     return {
       score,
-      rank,
-      rankBadge,
-      regimeMultiplier: multiplier,
+      ...BaseStrategy.rankFor(score),
       breakdown,
+    };
+  }
+
+  /**
+   * Đóng gói tín hiệu: loại lệnh có R:R TP1 dưới ngưỡng, ghi nhãn R:R thật và chấm điểm.
+   * Chiến lược đảo chiều yêu cầu R:R >= CONFIG.riskRewardMin; chiến lược xu hướng tối thiểu 1:1.
+   */
+  buildSignal({ action, entry, stopLoss, takeProfit, takeProfit2, indicators }, ind) {
+    const risk = Math.abs(entry - stopLoss);
+    if (!risk) return null;
+
+    const rr1 = Math.abs(takeProfit - entry) / risk;
+    const minRr = this.isTrendType ? 1.0 : CONFIG.riskRewardMin;
+    if (rr1 < minRr) return null;
+
+    const rrRatio = takeProfit2
+      ? `1 : ${rr1.toFixed(1)} (TP1) / 1 : ${(Math.abs(takeProfit2 - entry) / risk).toFixed(1)} (TP2)`
+      : `1 : ${rr1.toFixed(1)}`;
+
+    const signal = {
+      strategy: this.name,
+      action,
+      entry,
+      stopLoss,
+      takeProfit,
+      takeProfit2,
+      rrRatio,
+      indicators,
+    };
+
+    return {
+      ...signal,
+      ...this.evaluateScore(signal, ind),
     };
   }
 
@@ -339,4 +435,4 @@ class BaseStrategy {
 }
 
 module.exports = BaseStrategy;
-
+module.exports.TREND_TYPES = TREND_TYPES;

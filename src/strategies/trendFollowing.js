@@ -5,7 +5,7 @@ class TrendFollowingStrategy extends BaseStrategy {
     super(
       'Trend Following (EMA Ribbon + ADX + MACD + StochRSI)',
       'Chiến lược bám theo xu hướng chủ đạo được xác nhận bởi ADX và nhịp hồi',
-      85,
+      50,
       'TREND'
     );
   }
@@ -61,18 +61,12 @@ class TrendFollowingStrategy extends BaseStrategy {
 
     if (!action) return null;
 
-    const risk = Math.abs(currentPrice - stopLoss);
-    const reward1 = Math.abs(takeProfit - currentPrice);
-    const reward2 = Math.abs(takeProfit2 - currentPrice);
-
-    const signal = {
-      strategy: this.name,
+    return this.buildSignal({
       action,
       entry: currentPrice,
       stopLoss,
       takeProfit,
       takeProfit2,
-      rrRatio: `1 : ${(reward1 / risk).toFixed(1)} (TP1) / 1 : ${(reward2 / risk).toFixed(1)} (TP2)`,
       indicators: {
         currentPrice,
         ema20,
@@ -83,13 +77,7 @@ class TrendFollowingStrategy extends BaseStrategy {
         adx,
         stochRsiK: stochRsi ? stochRsi.k : null,
       },
-    };
-
-    const scoreData = this.evaluateScore(signal, ind);
-    return {
-      ...signal,
-      ...scoreData,
-    };
+    }, ind);
   }
 }
 

@@ -1,9 +1,13 @@
 const CONFIG = require('./config');
-const { fetchCandles } = require('./services/marketData');
+const { fetchCandles, getClosedCandles, timeframeToMs } = require('./services/marketData');
 const { evaluateAllStrategies, strategies } = require('./strategies');
+const { getMinScore, SignalCooldown } = require('./signalFilter');
 const { validateTradeSignal, generateMarketDigest } = require('./ai/geminiAnalyzer');
 const { sendTradeAlert, sendMarketDigest } = require('./services/telegram');
-const { EMA, RSI, ATR, ADX, StochasticRSI, VWAP, MFI } = require('technicalindicators');
+
+// Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản
+const lastAnalyzedCandle = new Map();
+const signalCooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
 
 /**
  * Vẽ thanh đo điểm số Confluence trực quan trên console (từ crypto-gold-detector)
@@ -19,80 +23,34 @@ function renderScoreBar(score) {
 
 /**
  * Trích xuất snapshot thị trường để phục vụ thẩm định và báo cáo
+ * Dùng lại bộ chỉ báo đã tính cho các chiến lược (cache theo marketData) để AI thấy đúng số liệu chiến lược đã dùng
  */
 function createMarketSnapshot(marketData) {
-  const { closes, highs, lows, volumes, candles } = marketData;
-  const currentPrice = closes[closes.length - 1];
-
-  const ema20 = EMA.calculate({ period: 20, values: closes });
-  const ema50 = EMA.calculate({ period: 50, values: closes });
-  const ema200 = EMA.calculate({ period: 200, values: closes });
-  const rsi = RSI.calculate({ period: 14, values: closes });
-  const atr = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
-
-  let adxVal = 0, pdiVal = 0, mdiVal = 0;
-  try {
-    const adxRes = ADX.calculate({ period: 14, high: highs, low: lows, close: closes }) || [];
-    if (adxRes.length > 0) {
-      adxVal = adxRes[adxRes.length - 1].adx;
-      pdiVal = adxRes[adxRes.length - 1].pdi;
-      mdiVal = adxRes[adxRes.length - 1].mdi;
-    }
-  } catch (e) {}
-
-  let stochK = null, stochD = null;
-  try {
-    const stochRes = StochasticRSI.calculate({
-      values: closes,
-      rsiPeriod: 14,
-      stochasticPeriod: 14,
-      kPeriod: 3,
-      dPeriod: 3,
-    }) || [];
-    if (stochRes.length > 0) {
-      stochK = stochRes[stochRes.length - 1].k;
-      stochD = stochRes[stochRes.length - 1].d;
-    }
-  } catch (e) {}
-
-  let vwapVal = null;
-  let mfiVal = 50;
-  const hasValidVolume = volumes && volumes.some((v) => v > 0);
-  if (hasValidVolume) {
-    try {
-      const vwapRes = VWAP.calculate({ high: highs, low: lows, close: closes, volume: volumes }) || [];
-      if (vwapRes.length > 0 && !isNaN(vwapRes[vwapRes.length - 1])) {
-        vwapVal = vwapRes[vwapRes.length - 1];
-      }
-      const mfiRes = MFI.calculate({ high: highs, low: lows, close: closes, volume: volumes, period: 14 }) || [];
-      if (mfiRes.length > 0) mfiVal = mfiRes[mfiRes.length - 1];
-    } catch (e) {}
-  }
+  const { highs, lows, candles } = marketData;
+  const ind = strategies[0].calculateIndicators(marketData);
 
   const lookback = 20;
   const recentHighs = highs.slice(-lookback);
   const recentLows = lows.slice(-lookback);
 
-  const lastCandle = candles && candles.length > 0 ? candles[candles.length - 1] : null;
-
   return {
     symbol: marketData.symbol || CONFIG.symbol,
     displayName: marketData.displayName || marketData.symbol || CONFIG.symbol,
     timeframe: CONFIG.timeframe,
-    currentPrice,
-    ema20: ema20[ema20.length - 1],
-    ema50: ema50[ema50.length - 1],
-    ema200: ema200[ema200.length - 1],
-    rsi: rsi[rsi.length - 1],
-    atr: atr[atr.length - 1],
-    adx: adxVal,
-    pdi: pdiVal,
-    mdi: mdiVal,
-    stochK,
-    stochD,
-    vwap: vwapVal,
-    mfi: mfiVal,
-    delta: lastCandle ? (lastCandle.delta || 0) : 0,
+    currentPrice: ind.currentPrice,
+    ema20: ind.ema20,
+    ema50: ind.ema50,
+    ema200: ind.ema200,
+    rsi: ind.rsi,
+    atr: ind.atr,
+    adx: ind.adx,
+    pdi: ind.pdi,
+    mdi: ind.mdi,
+    stochK: ind.stochRsi ? ind.stochRsi.k : null,
+    stochD: ind.stochRsi ? ind.stochRsi.d : null,
+    vwap: ind.vwap,
+    mfi: ind.mfi,
+    delta: ind.delta,
     recentHigh: Math.max(...recentHighs),
     recentLow: Math.min(...recentLows),
     recentCandles: candles.slice(-5).map((c) => ({
@@ -111,11 +69,22 @@ async function scanSingleSymbol(symbol) {
   const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
   console.log(`\n[${timestamp}] 🔍 Đang quét thị trường: ${symbol} (${CONFIG.timeframe})...`);
 
-  const marketData = await fetchCandles(symbol, CONFIG.timeframe, 14);
+  const rawData = await fetchCandles(symbol, CONFIG.timeframe, 14);
+  // Chỉ phân tích nến đã đóng để tín hiệu không bị vẽ lại (repaint) khi nến đang chạy thay đổi
+  const marketData = rawData && getClosedCandles(rawData, CONFIG.timeframe);
   if (!marketData || marketData.closes.length < 50) {
     console.log(`⚠️ [${symbol}] Chưa gom đủ dữ liệu nến.`);
     return;
   }
+
+  // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
+  const lastClosed = marketData.candles[marketData.candles.length - 1];
+  const candleTime = new Date(lastClosed.date).getTime();
+  if (lastAnalyzedCandle.get(symbol) === candleTime) {
+    console.log(`ℹ️ [${symbol}] Nến ${new Date(candleTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })} đã được phân tích, chờ nến mới đóng.`);
+    return;
+  }
+  lastAnalyzedCandle.set(symbol, candleTime);
 
   const snapshot = createMarketSnapshot(marketData);
   const prevPrice = marketData.closes[marketData.closes.length - 2];
@@ -154,12 +123,15 @@ async function scanSingleSymbol(symbol) {
     }
 
     // Lọc theo ngưỡng điểm tối thiểu (mặc định 65 cho Order Flow, 70 cho chiến lược chung)
-    const minThreshold = signal.strategy.includes('Order Flow')
-      ? CONFIG.minConfluenceScore
-      : CONFIG.minStrategyScore;
+    const minThreshold = getMinScore(signal);
 
     if (signal.score != null && signal.score < minThreshold) {
       console.log(`✋ Tín hiệu bị loại bỏ do điểm chất lượng (${signal.score}/100) thấp hơn ngưỡng tối thiểu (${minThreshold}).`);
+      continue;
+    }
+
+    if (signalCooldown.isCoolingDown(symbol, signal.action, candleTime)) {
+      console.log(`⏳ Bỏ qua: đã phát tín hiệu ${signal.action} cho ${snapshot.displayName} trong ${CONFIG.signalCooldownBars} nến gần đây.`);
       continue;
     }
 
@@ -181,6 +153,7 @@ async function scanSingleSymbol(symbol) {
     if (shouldSend) {
       signal.aiReview = aiReview;
       await sendTradeAlert(signal);
+      signalCooldown.record(symbol, signal.action, candleTime);
       console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: [${snapshot.displayName}] ${signal.action} $${signal.entry.toFixed(2)} [Điểm: ${signal.score || 'N/A'}] qua Telegram!\n`);
     }
   }
@@ -208,7 +181,8 @@ async function runMarketBriefing(targetSymbol = null) {
   for (const sym of symbolsToBrief) {
     try {
       console.log(`\n📊 Đang tạo bản tin thị trường định kỳ bằng AI cho ${sym}...`);
-      const marketData = await fetchCandles(sym, CONFIG.timeframe, 14);
+      const rawData = await fetchCandles(sym, CONFIG.timeframe, 14);
+      const marketData = rawData && getClosedCandles(rawData, CONFIG.timeframe);
       if (!marketData || marketData.closes.length < 50) continue;
 
       const snapshot = createMarketSnapshot(marketData);

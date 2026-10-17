@@ -5,7 +5,7 @@ class BreakoutAtrStrategy extends BaseStrategy {
     super(
       'Volatility Breakout (Donchian Range + Volume + ATR Expansion)',
       'Chiến lược đánh bứt phá đỉnh/đáy kèm thanh khoản bùng nổ và xung lực ADX',
-      75,
+      50,
       'BREAKOUT'
     );
   }
@@ -66,18 +66,12 @@ class BreakoutAtrStrategy extends BaseStrategy {
 
     if (!action) return null;
 
-    const risk = Math.abs(currentPrice - stopLoss);
-    const reward1 = Math.abs(takeProfit - currentPrice);
-    const reward2 = Math.abs(takeProfit2 - currentPrice);
-
-    const signal = {
-      strategy: this.name,
+    return this.buildSignal({
       action,
       entry: currentPrice,
       stopLoss,
       takeProfit,
       takeProfit2,
-      rrRatio: `1 : ${(reward1 / risk).toFixed(1)} / 1 : ${(reward2 / risk).toFixed(1)}`,
       indicators: {
         currentPrice,
         atr,
@@ -89,13 +83,7 @@ class BreakoutAtrStrategy extends BaseStrategy {
         ema200,
         vwap,
       },
-    };
-
-    const scoreData = this.evaluateScore(signal, ind);
-    return {
-      ...signal,
-      ...scoreData,
-    };
+    }, ind);
   }
 }
 

@@ -14,7 +14,7 @@ class OrderFlowReversalStrategy extends BaseStrategy {
    * Phân tích Đỉnh / Đáy đa chiều với Hệ thống chấm điểm đồng thuận (Confluence Scoring Engine 0 - 100đ)
    * Kế thừa toàn bộ 5 trụ cột từ crypto-gold-detector:
    * 1. Smart Money Concepts (Liquidity Sweep & Rejection Wick)
-   * 2. Volume Climax & Order Flow Delta Absorption
+   * 2. Order Flow Delta Absorption (chỉ khi nguồn có Delta thật)
    * 3. Momentum RSI & Divergence
    * 4. Thống kê độ lệch chuẩn Bollinger Bands 2.0σ
    * 5. Bộ lọc xu hướng Trend Filter EMA 50
@@ -24,11 +24,11 @@ class OrderFlowReversalStrategy extends BaseStrategy {
     if (!candles || candles.length < 40) return null;
 
     const ind = this.calculateIndicators(marketData);
-    const { closes, highs, lows, volumes, ema50, ema200, bb } = ind;
+    const { closes, ema50, ema200, bb, atr, adx, rsiSeries, hasRealDelta } = ind;
 
-    // Chọn nến mục tiêu: Nến vừa đóng hoàn chỉnh (candles.length - 2) để chống repaint,
-    // hoặc nến cuối nếu đang ở chế độ nến đóng (candles.length - 1)
-    const targetIndex = candles.length >= 2 ? candles.length - 2 : candles.length - 1;
+    // Nến mục tiêu: nến cuối cùng. botEngine chỉ truyền vào các nến đã đóng nên không bị repaint,
+    // và mọi chỉ báo (RSI, BB, EMA50) đều được lấy tại đúng nến này.
+    const targetIndex = candles.length - 1;
     if (targetIndex < 25) return null;
 
     const candle = candles[targetIndex];
@@ -40,7 +40,7 @@ class OrderFlowReversalStrategy extends BaseStrategy {
     const low = candle.low;
     const close = candle.close;
     const volume = candle.volume || 0;
-    const delta = candle.delta != null ? candle.delta : 0;
+    const delta = ind.delta;
 
     // Tính Volume SMA 20
     const volSmaSlice = candles.slice(Math.max(0, targetIndex - 19), targetIndex + 1);
@@ -58,13 +58,14 @@ class OrderFlowReversalStrategy extends BaseStrategy {
     const maxPrevHigh = Math.max(...prevCandles.map((c) => c.high));
     const minPrevLow = Math.min(...prevCandles.map((c) => c.low));
 
-    // Lấy RSI tại nến mục tiêu
-    const rsi = ind.rsiSeries && ind.rsiSeries.length > 1
-      ? ind.rsiSeries[ind.rsiSeries.length - 2]
-      : ind.rsi;
+    // RSI và Bollinger Bands tại nến mục tiêu
+    const rsi = ind.rsi;
+    const targetBb = bb;
 
-    // Bollinger Bands tại nến mục tiêu
-    const targetBb = bb || ind.prevBb;
+    // RSI tại một nến bất kỳ trong mảng candles (RSI ngắn hơn mảng giá 14 phần tử đầu)
+    const rsiOffset = closes.length - rsiSeries.length;
+    const rsiAt = (candleIndex) => rsiSeries[candleIndex - rsiOffset];
+    const prevStart = targetIndex - lookbackPeriod;
 
     // ==========================================
     // 1. KIỂM TRA TÍN HIỆU TẠO ĐỈNH (TOP / SHORT)
@@ -81,26 +82,23 @@ class OrderFlowReversalStrategy extends BaseStrategy {
     } else if (sweptHigh && upperWickRatio >= 0.40) {
       topScore += 20;
       topFactors.push(`Chạm đỉnh cao nhất với râu trên từ chối dài ${(upperWickRatio * 100).toFixed(0)}% [20đ]`);
-    } else if (upperWickRatio >= 0.50 && high >= maxPrevHigh * 0.995) {
+    } else if (upperWickRatio >= 0.50 && high >= maxPrevHigh - 0.5 * atr) {
       topScore += 15;
       topFactors.push(`Nến Pinbar / Shooting Star tại kháng cự đỉnh [15đ]`);
     }
 
-    // Trụ cột 2: Volume Climax & Order Flow Delta (Max 25đ)
-    if (volRatio >= 2.0) {
-      topScore += 15;
-      topFactors.push(`Volume Climax đột biến ${(volRatio).toFixed(1)}x TB (Dấu hiệu cá mập xả) [15đ]`);
-    } else if (volRatio >= 1.5) {
-      topScore += 10;
-      topFactors.push(`Volume tăng cao ${(volRatio).toFixed(1)}x TB [10đ]`);
-    }
-
-    if (delta < 0 && close >= open) {
+    // Trụ cột 2: Order Flow Delta (Max 10đ)
+    // Volume Climax không còn được cộng điểm: backtest cho thấy volume đột biến tại đỉnh/đáy
+    // thường là lực phá vỡ tiếp diễn hơn là kiệt sức, tín hiệu điểm cao do volume có kết quả kém hơn.
+    if (hasRealDelta && delta < 0 && close >= open) {
       topScore += 10;
       topFactors.push(`Hấp thụ Cung: Nến xanh nhưng Delta âm (${delta.toFixed(1)}) do Limit Sell chặn trên [10đ]`);
-    } else if (delta < 0) {
+    } else if (hasRealDelta && delta < 0) {
       topScore += 5;
       topFactors.push(`Phe bán chủ động áp đảo (Delta âm ${delta.toFixed(1)}) [5đ]`);
+    } else if (!hasRealDelta && close < open) {
+      topScore += 5;
+      topFactors.push(`Nến đóng cửa giảm xác nhận lực bán (nguồn không có Delta thật) [5đ]`);
     }
 
     // Trụ cột 3: Momentum RSI & Phân kỳ (Max 25đ)
@@ -112,12 +110,15 @@ class OrderFlowReversalStrategy extends BaseStrategy {
       topFactors.push(`RSI vùng hưng phấn cao (${rsi.toFixed(1)}) [8đ]`);
     }
 
-    // Tìm phân kỳ âm RSI với các đỉnh trước trong 25 nến
-    const recentHighCandles = prevCandles.filter((c) => c.high >= maxPrevHigh * 0.997);
-    if (recentHighCandles.length > 0) {
-      const prevPeak = recentHighCandles[recentHighCandles.length - 1];
-      const prevRsiVal = prevPeak.rsi || (ind.rsiSeries ? ind.rsiSeries[ind.rsiSeries.length - 15] : 60);
-      if (high >= prevPeak.high && rsi < prevRsiVal - 2.0) {
+    // Tìm phân kỳ âm RSI với đỉnh gần nhất trong 25 nến (so RSI tại đúng nến đỉnh đó)
+    let prevPeakIdx = -1;
+    prevCandles.forEach((c, idx) => {
+      if (c.high >= maxPrevHigh - 0.3 * atr) prevPeakIdx = idx;
+    });
+    if (prevPeakIdx >= 0) {
+      const prevPeak = prevCandles[prevPeakIdx];
+      const prevRsiVal = rsiAt(prevStart + prevPeakIdx);
+      if (prevRsiVal != null && high >= prevPeak.high && rsi < prevRsiVal - 2.0) {
         topScore += 10;
         topFactors.push(`Phân kỳ âm RSI: Giá tạo đỉnh mới nhưng RSI suy yếu (${rsi.toFixed(1)} < ${prevRsiVal.toFixed(1)}) [10đ]`);
       }
@@ -150,26 +151,21 @@ class OrderFlowReversalStrategy extends BaseStrategy {
     } else if (sweptLow && lowerWickRatio >= 0.40) {
       bottomScore += 20;
       bottomFactors.push(`Chạm đáy sâu nhất với rút chân mạnh ${(lowerWickRatio * 100).toFixed(0)}% [20đ]`);
-    } else if (lowerWickRatio >= 0.50 && low <= minPrevLow * 1.005) {
+    } else if (lowerWickRatio >= 0.50 && low <= minPrevLow + 0.5 * atr) {
       bottomScore += 15;
       bottomFactors.push(`Nến Hammer / Pinbar đỡ giá tại hỗ trợ [15đ]`);
     }
 
-    // Trụ cột 2: Volume Climax & Order Flow Delta (Max 25đ)
-    if (volRatio >= 2.0) {
-      bottomScore += 15;
-      bottomFactors.push(`Volume Climax bán tháo ${(volRatio).toFixed(1)}x TB (Selling Climax) [15đ]`);
-    } else if (volRatio >= 1.5) {
-      bottomScore += 10;
-      bottomFactors.push(`Volume bán lớn ${(volRatio).toFixed(1)}x TB [10đ]`);
-    }
-
-    if (delta > 0 && close <= open) {
+    // Trụ cột 2: Order Flow Delta (Max 10đ)
+    if (hasRealDelta && delta > 0 && close <= open) {
       bottomScore += 10;
       bottomFactors.push(`Hấp thụ Cầu: Nến đỏ nhưng Delta dương (+${delta.toFixed(1)}) do Limit Buy kê đỡ [10đ]`);
-    } else if (delta > 0) {
+    } else if (hasRealDelta && delta > 0) {
       bottomScore += 5;
       bottomFactors.push(`Phe mua chủ động gom hàng (Delta +${delta.toFixed(1)}) [5đ]`);
+    } else if (!hasRealDelta && close > open) {
+      bottomScore += 5;
+      bottomFactors.push(`Nến đóng cửa tăng xác nhận lực mua (nguồn không có Delta thật) [5đ]`);
     }
 
     // Trụ cột 3: Momentum RSI & Phân kỳ (Max 25đ)
@@ -181,12 +177,15 @@ class OrderFlowReversalStrategy extends BaseStrategy {
       bottomFactors.push(`RSI vùng hoảng loạn sâu (${rsi.toFixed(1)}) [8đ]`);
     }
 
-    // Tìm phân kỳ dương RSI với các đáy trước
-    const recentLowCandles = prevCandles.filter((c) => c.low <= minPrevLow * 1.003);
-    if (recentLowCandles.length > 0) {
-      const prevTrough = recentLowCandles[recentLowCandles.length - 1];
-      const prevRsiVal = prevTrough.rsi || (ind.rsiSeries ? ind.rsiSeries[ind.rsiSeries.length - 15] : 40);
-      if (low <= prevTrough.low && rsi > prevRsiVal + 2.0) {
+    // Tìm phân kỳ dương RSI với đáy gần nhất trong 25 nến (so RSI tại đúng nến đáy đó)
+    let prevTroughIdx = -1;
+    prevCandles.forEach((c, idx) => {
+      if (c.low <= minPrevLow + 0.3 * atr) prevTroughIdx = idx;
+    });
+    if (prevTroughIdx >= 0) {
+      const prevTrough = prevCandles[prevTroughIdx];
+      const prevRsiVal = rsiAt(prevStart + prevTroughIdx);
+      if (prevRsiVal != null && low <= prevTrough.low && rsi > prevRsiVal + 2.0) {
         bottomScore += 10;
         bottomFactors.push(`Phân kỳ dương RSI: Giá thủng đáy nhưng RSI tạo đáy cao hơn (${rsi.toFixed(1)} > ${prevRsiVal.toFixed(1)}) [10đ]`);
       }
@@ -204,7 +203,15 @@ class OrderFlowReversalStrategy extends BaseStrategy {
       bottomFactors.push(`Thuận xu hướng tăng ngắn hạn (Trên EMA 50 - Bắt đáy sóng hồi) [10đ]`);
     }
 
-    // Ngưỡng điểm kích hoạt: 65đ (Hạng A Chuẩn), >= 80đ (Hạng VIP A+)
+    // Pha thị trường: bắt đỉnh/đáy ngược trend mạnh có kết quả backtest âm
+    if (adx >= 22) {
+      topScore -= 15;
+      bottomScore -= 15;
+      topFactors.push(`Trend mạnh, đánh ngược dòng rủi ro (ADX ${adx.toFixed(1)}) [-15đ]`);
+      bottomFactors.push(`Trend mạnh, đánh ngược dòng rủi ro (ADX ${adx.toFixed(1)}) [-15đ]`);
+    }
+
+    // Ngưỡng điểm kích hoạt tối thiểu
     const minScore = 65;
 
     // ==========================================
@@ -217,7 +224,7 @@ class OrderFlowReversalStrategy extends BaseStrategy {
 
       const tp1 = parseFloat((close - risk * 1.5).toFixed(2));
       const tp2 = parseFloat((close - risk * 3.0).toFixed(2));
-      const grade = topScore >= 80 ? '💎 VIP (A+) - TỈ LỆ THẮNG CAO' : '⚡ CHUẨN (A) - TÍN HIỆU TỐT';
+      const score = Math.min(100, topScore);
 
       return {
         strategy: this.name,
@@ -227,12 +234,10 @@ class OrderFlowReversalStrategy extends BaseStrategy {
         takeProfit: tp1,
         takeProfit2: tp2,
         rrRatio: '1 : 1.5 (TP1) / 1 : 3.0 (TP2)',
-        score: Math.min(100, topScore),
-        rank: topScore >= 80 ? 'S' : 'A',
-        rankBadge: grade,
+        score,
+        ...BaseStrategy.rankFor(score),
         breakdown: topFactors,
         factors: topFactors,
-        grade,
         indicators: {
           currentPrice: close,
           rsi,
@@ -256,7 +261,7 @@ class OrderFlowReversalStrategy extends BaseStrategy {
 
       const tp1 = parseFloat((close + risk * 1.5).toFixed(2));
       const tp2 = parseFloat((close + risk * 3.0).toFixed(2));
-      const grade = bottomScore >= 80 ? '💎 VIP (A+) - TỈ LỆ THẮNG CAO' : '⚡ CHUẨN (A) - TÍN HIỆU TỐT';
+      const score = Math.min(100, bottomScore);
 
       return {
         strategy: this.name,
@@ -266,12 +271,10 @@ class OrderFlowReversalStrategy extends BaseStrategy {
         takeProfit: tp1,
         takeProfit2: tp2,
         rrRatio: '1 : 1.5 (TP1) / 1 : 3.0 (TP2)',
-        score: Math.min(100, bottomScore),
-        rank: bottomScore >= 80 ? 'S' : 'A',
-        rankBadge: grade,
+        score,
+        ...BaseStrategy.rankFor(score),
         breakdown: bottomFactors,
         factors: bottomFactors,
-        grade,
         indicators: {
           currentPrice: close,
           rsi,
