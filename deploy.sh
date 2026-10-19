@@ -29,7 +29,7 @@ fi
 
 echo ""
 echo "📦 Đang đồng bộ mã nguồn lên VPS (loại bỏ node_modules để tiết kiệm băng thông)..."
-rsync -avz --exclude 'node_modules' --exclude '.git' -e "ssh -o StrictHostKeyChecking=no $SSH_OPT" ./ $VPS_USER@$VPS_IP:~/gold-trading-bot/
+rsync -avz --exclude 'node_modules' --exclude '.git' --exclude '/data/' -e "ssh -o StrictHostKeyChecking=no $SSH_OPT" ./ $VPS_USER@$VPS_IP:~/gold-trading-bot/
 
 echo ""
 echo "⚙️ Đang kết nối vào VPS để cài đặt môi trường (Node.js, pnpm, pm2) và khởi chạy Bot..."

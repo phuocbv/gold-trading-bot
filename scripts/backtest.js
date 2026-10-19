@@ -15,6 +15,7 @@ const CONFIG = require('../src/config');
 const { fetchTradingViewCandles, resolveSymbolSources, getClosedCandles, timeframeToMs } = require('../src/services/marketData');
 const { evaluateAllStrategies } = require('../src/strategies');
 const { getMinScore, SignalCooldown } = require('../src/signalFilter');
+const { checkCandleHit, rMultiple, primaryStrategyName } = require('../src/tradeOutcome');
 
 const WINDOW = 500; // Số nến đưa vào mỗi lần phân tích, giống dữ liệu bot tải khi chạy thật
 const WARMUP = 260;
@@ -83,18 +84,13 @@ function toMarketData(candles, hasRealDelta) {
  * Kết quả lệnh tính theo R: chạm TP1 = +R:R, chạm SL = -1, hết horizon = lãi/lỗ theo giá đóng cửa
  */
 function simulate(candles, index, signal, horizon) {
-  const isBuy = signal.action === 'BUY';
-  const risk = Math.abs(signal.entry - signal.stopLoss);
-  const rr = Math.abs(signal.takeProfit - signal.entry) / risk;
   const lastIndex = Math.min(candles.length - 1, index + horizon);
 
   for (let j = index + 1; j <= lastIndex; j++) {
-    const c = candles[j];
-    if (isBuy ? c.low <= signal.stopLoss : c.high >= signal.stopLoss) return { outcome: 'SL', r: -1 };
-    if (isBuy ? c.high >= signal.takeProfit : c.low <= signal.takeProfit) return { outcome: 'TP', r: rr };
+    const hit = checkCandleHit(signal, candles[j]);
+    if (hit) return { outcome: hit, r: rMultiple(signal, hit === 'SL' ? signal.stopLoss : signal.takeProfit) };
   }
-  const exit = candles[lastIndex].close;
-  return { outcome: 'OPEN', r: (isBuy ? exit - signal.entry : signal.entry - exit) / risk };
+  return { outcome: 'OPEN', r: rMultiple(signal, candles[lastIndex].close) };
 }
 
 function summarize(trades) {
@@ -124,7 +120,7 @@ async function backtestSymbol(symbol, args) {
       if (cooldown.isCoolingDown(symbol, signal.action, candleTime)) continue;
       cooldown.record(symbol, signal.action, candleTime);
 
-      const primary = (signal.strategy.split(']: ')[1] || signal.strategy).split(' (')[0];
+      const primary = primaryStrategyName(signal.strategy);
       trades.push({ primary, score: signal.score, ...simulate(candles, i, signal, args.horizon) });
     }
   }

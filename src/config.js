@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const path = require('path');
 const dns = require('dns');
 if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
@@ -14,6 +15,10 @@ function parseGeminiKeys() {
 }
 
 const geminiApiKeys = parseGeminiKeys();
+
+function parseList(raw) {
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
 
 const rawSymbols = process.env.SYMBOLS || process.env.SYMBOL || 'XAU/USD';
 const parsedSymbols = rawSymbols.split(',').map((s) => s.trim()).filter(Boolean);
@@ -51,6 +56,24 @@ const CONFIG = {
   riskRewardMin: 1.5,
   atrMultiplierSl: 1.5,
   atrMultiplierTp: 3.0,
+
+  // Theo dõi kết quả tín hiệu & Dashboard thống kê
+  signalDbPath: process.env.SIGNAL_DB_PATH || path.join(__dirname, '..', 'data', 'signals.json'),
+  // Lệnh chưa chạm TP1/SL sau N nến thì chốt theo giá đóng cửa (giống horizon mặc định của backtest)
+  signalTrackHorizonBars: parseInt(process.env.SIGNAL_TRACK_HORIZON_BARS || '48', 10),
+  // Nếu đặt, dashboard yêu cầu ?token=... trên URL
+  dashboardToken: process.env.DASHBOARD_TOKEN || '',
+
+  // Lịch tin tức kinh tế (ForexFactory): nhắn Telegram trước giờ ra tin & chặn tín hiệu quanh giờ ra tin
+  newsEnabled: process.env.NEWS_ENABLED !== 'false',
+  newsCurrencies: parseList(process.env.NEWS_CURRENCIES || 'USD').map((c) => c.toUpperCase()),
+  newsImpacts: parseList(process.env.NEWS_IMPACTS || 'High'),
+  newsAlertMinutes: parseInt(process.env.NEWS_ALERT_MINUTES || '30', 10),
+  newsBlackoutMinutes: parseInt(process.env.NEWS_BLACKOUT_MINUTES || '30', 10),
+  // Feed đầu tiên là nguồn chính (tuần này); các feed sau là phụ (feed tuần sau thường 404 tới cuối tuần)
+  newsFeedUrls: parseList(process.env.NEWS_FEED_URLS ||
+    'https://nfs.faireconomy.media/ff_calendar_thisweek.json,https://nfs.faireconomy.media/ff_calendar_nextweek.json'),
+  newsStatePath: process.env.NEWS_STATE_PATH || path.join(__dirname, '..', 'data', 'news.json'),
 };
 
 module.exports = CONFIG;

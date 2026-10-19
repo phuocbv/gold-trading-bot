@@ -4,6 +4,8 @@ const { evaluateAllStrategies, strategies } = require('./strategies');
 const { getMinScore, SignalCooldown } = require('./signalFilter');
 const { validateTradeSignal, generateMarketDigest } = require('./ai/geminiAnalyzer');
 const { sendTradeAlert, sendMarketDigest } = require('./services/telegram');
+const signalTracker = require('./services/signalTracker');
+const { getNewsBlackout, describeEvent } = require('./services/newsCalendar');
 
 // Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản
 const lastAnalyzedCandle = new Map();
@@ -77,6 +79,9 @@ async function scanSingleSymbol(symbol) {
     return;
   }
 
+  // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó theo các nến mới đóng
+  signalTracker.updateOpenSignals(symbol, marketData.candles);
+
   // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
   const lastClosed = marketData.candles[marketData.candles.length - 1];
   const candleTime = new Date(lastClosed.date).getTime();
@@ -103,6 +108,13 @@ async function scanSingleSymbol(symbol) {
 
   if (candidateSignals.length === 0) {
     console.log(`ℹ️ [Trạng thái - ${snapshot.displayName}]: Đã quét ${strategies.length} chiến lược -> Chưa có tín hiệu vào lệnh.`);
+    return;
+  }
+
+  // Không phát tín hiệu trong khung ±N phút quanh giờ ra tin tác động mạnh (giá giật mạnh, giãn spread)
+  const newsEvents = getNewsBlackout();
+  if (newsEvents.length > 0) {
+    console.log(`⛔ [${snapshot.displayName}] Bỏ qua ${candidateSignals.length} tín hiệu: đang trong khung ±${CONFIG.newsBlackoutMinutes} phút quanh tin ${newsEvents.map(describeEvent).join(', ')}.`);
     return;
   }
 
@@ -150,12 +162,16 @@ async function scanSingleSymbol(symbol) {
       }
     }
 
+    signal.aiReview = aiReview;
+    let delivered = false;
     if (shouldSend) {
-      signal.aiReview = aiReview;
-      await sendTradeAlert(signal);
+      delivered = await sendTradeAlert(signal);
       signalCooldown.record(symbol, signal.action, candleTime);
       console.log(`🚀 ĐÃ PHÁT TÍN HIỆU THÀNH CÔNG: [${snapshot.displayName}] ${signal.action} $${signal.entry.toFixed(2)} [Điểm: ${signal.score || 'N/A'}] qua Telegram!\n`);
     }
+
+    // Ghi nhận cả tín hiệu bị AI từ chối để dashboard so sánh được hiệu quả của bộ lọc AI
+    signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered });
   }
 }
 

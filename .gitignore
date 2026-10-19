@@ -16,3 +16,6 @@ pnpm-debug.log*
 # History & Temp
 .history/
 .DS_Store
+
+# Thống kê tín hiệu (dữ liệu runtime)
+data/

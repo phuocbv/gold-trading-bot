@@ -7,6 +7,9 @@ services:
       - .env
     ports:
       - "3000:3000"
+    volumes:
+      # Giữ lại thống kê tín hiệu khi build lại / khởi động lại container
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
       - TZ=Asia/Ho_Chi_Minh
