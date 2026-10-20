@@ -3,19 +3,26 @@ const path = require('path');
 
 /**
  * Đọc file JSON; trả về fallback nếu file chưa tồn tại.
- * File hỏng được đổi tên thành *.corrupt-<thời gian> để không bị ghi đè mất dữ liệu cũ.
+ * File có nội dung JSON hỏng được đổi tên thành *.corrupt-<thời gian> để không bị ghi đè mất dữ liệu cũ.
+ * Lỗi đọc file khác (quyền truy cập, quá nhiều file mở...) được ném ra để lần sau đọc lại, không xóa dữ liệu.
  */
 function readJson(filePath, fallback) {
+  let text;
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    text = fs.readFileSync(filePath, 'utf8');
   } catch (err) {
-    if (err.code !== 'ENOENT') {
-      const backup = `${filePath}.corrupt-${Date.now()}`;
-      console.error(`❌ [JsonStore] Không đọc được ${filePath} (${err.message}). Đã chuyển sang ${backup} và bắt đầu file mới.`);
-      try {
-        fs.renameSync(filePath, backup);
-      } catch (e) {}
-    }
+    if (err.code === 'ENOENT') return fallback;
+    throw err;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    const backup = `${filePath}.corrupt-${Date.now()}`;
+    console.error(`❌ [JsonStore] File ${filePath} bị hỏng (${err.message}). Đã chuyển sang ${backup} và bắt đầu file mới.`);
+    try {
+      fs.renameSync(filePath, backup);
+    } catch (e) {}
     return fallback;
   }
 }

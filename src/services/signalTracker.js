@@ -18,9 +18,9 @@ function save() {
 /**
  * Ghi nhận một tín hiệu vừa phát (hoặc bị AI từ chối) để theo dõi kết quả TP1/SL
  * @param {object} signal - Tín hiệu đã chấm điểm (có symbol, displayName, aiReview)
- * @param {object} meta - { candleTime, sent: đã qua bộ lọc AI, delivered: Telegram gửi thành công }
+ * @param {object} meta - { candleTime, sent: đã qua bộ lọc AI, delivered: Telegram gửi thành công, source: nguồn dữ liệu nến }
  */
-function recordSignal(signal, { candleTime, sent, delivered }) {
+function recordSignal(signal, { candleTime, sent, delivered, source }) {
   load();
   const id = `${signal.symbol}|${signal.action}|${candleTime}`;
   if (records.some((r) => r.id === id)) return;
@@ -41,6 +41,7 @@ function recordSignal(signal, { candleTime, sent, delivered }) {
     score: signal.score ?? null,
     candleTime: signalTime,
     timeframe: CONFIG.timeframe,
+    source: source || null,
     sent,
     delivered: Boolean(delivered),
     aiMode: ai ? ai.mode : null,
@@ -57,15 +58,19 @@ function recordSignal(signal, { candleTime, sent, delivered }) {
 
 /**
  * Cập nhật các lệnh đang mở của một tài sản theo các nến đã đóng mới (chạm TP1 / SL / hết hạn)
+ * Chỉ dùng nến cùng nguồn dữ liệu với lúc phát tín hiệu: nguồn dự phòng (vd: Binance PAXG thay cho OANDA XAU)
+ * lệch giá vài đô sẽ làm chạm SL/TP sai, nên lệnh chờ tới khi có lại dữ liệu đúng nguồn.
  * @param {string} symbol
  * @param {Array<object>} candles - Chỉ gồm các nến đã đóng, cũ nhất -> mới nhất
+ * @param {string} [source] - Nguồn dữ liệu của các nến (marketData.source)
  */
-function updateOpenSignals(symbol, candles) {
+function updateOpenSignals(symbol, candles, source) {
   load();
   let changed = false;
 
   for (const rec of records) {
     if (rec.symbol !== symbol || rec.status !== 'OPEN') continue;
+    if (rec.source && source && rec.source !== source) continue;
     const checkedUntil = new Date(rec.lastCheckedTime).getTime();
 
     for (const candle of candles) {

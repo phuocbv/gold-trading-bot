@@ -26,7 +26,13 @@ let state = null;
 
 function load() {
   if (!state) {
-    state = { fetchedAt: 0, lastAttemptAt: 0, events: [], alerted: [], ...readJson(CONFIG.newsStatePath, {}) };
+    const saved = readJson(CONFIG.newsStatePath, {});
+    state = {
+      fetchedAt: Number(saved.fetchedAt) || 0,
+      lastAttemptAt: Number(saved.lastAttemptAt) || 0,
+      events: Array.isArray(saved.events) ? saved.events : [],
+      alerted: Array.isArray(saved.alerted) ? saved.alerted : [],
+    };
   }
   return state;
 }

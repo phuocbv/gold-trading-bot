@@ -401,6 +401,10 @@ class BaseStrategy {
     const risk = Math.abs(entry - stopLoss);
     if (!risk) return null;
 
+    // SL/TP phải nằm đúng phía so với Entry (vd: RSI Divergence đặt SL theo đáy/đỉnh swing mà giá có thể đã vượt qua)
+    const isBuy = action === 'BUY';
+    if (isBuy ? (stopLoss >= entry || takeProfit <= entry) : (stopLoss <= entry || takeProfit >= entry)) return null;
+
     const rr1 = Math.abs(takeProfit - entry) / risk;
     const minRr = this.isTrendType ? 1.0 : CONFIG.riskRewardMin;
     if (rr1 < minRr) return null;

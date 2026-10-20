@@ -67,7 +67,8 @@ const CONFIG = {
   // Lịch tin tức kinh tế (ForexFactory): nhắn Telegram trước giờ ra tin & chặn tín hiệu quanh giờ ra tin
   newsEnabled: process.env.NEWS_ENABLED !== 'false',
   newsCurrencies: parseList(process.env.NEWS_CURRENCIES || 'USD').map((c) => c.toUpperCase()),
-  newsImpacts: parseList(process.env.NEWS_IMPACTS || 'High'),
+  // Chuẩn hóa theo cách viết của ForexFactory: High | Medium | Low
+  newsImpacts: parseList(process.env.NEWS_IMPACTS || 'High').map((i) => i.charAt(0).toUpperCase() + i.slice(1).toLowerCase()),
   newsAlertMinutes: parseInt(process.env.NEWS_ALERT_MINUTES || '30', 10),
   newsBlackoutMinutes: parseInt(process.env.NEWS_BLACKOUT_MINUTES || '30', 10),
   // Feed đầu tiên là nguồn chính (tuần này); các feed sau là phụ (feed tuần sau thường 404 tới cuối tuần)

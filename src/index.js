@@ -6,6 +6,10 @@ const { strategies } = require('./strategies');
 const { registerDashboard } = require('./dashboard/server');
 const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
 
+function logNewsError(err) {
+  console.error('❌ [News] Lỗi lịch tin tức:', err.message);
+}
+
 async function startBot() {
   const isOnce = process.argv.includes('--once');
   const symbolsList = (CONFIG.symbols && CONFIG.symbols.length > 0) ? CONFIG.symbols.join(', ') : CONFIG.symbol;
@@ -32,7 +36,7 @@ async function startBot() {
   // Chế độ quét một lần (--once)
   if (isOnce) {
     console.log('\n⚡ Chế độ kiểm tra nhanh (--once): Đang tiến hành quét 1 lượt rồi thoát...');
-    await refreshCalendar();
+    await refreshCalendar().catch(logNewsError);
     await scanMarket();
     console.log('✅ Hoàn tất lượt quét một lần. Tạm biệt!');
     process.exit(0);
@@ -58,18 +62,18 @@ async function startBot() {
   });
 
   // Tải lịch tin trước lượt quét đầu tiên để bộ chặn tín hiệu quanh giờ ra tin có dữ liệu
-  await refreshCalendar();
+  await refreshCalendar().catch(logNewsError);
+
+  // Mỗi phút kiểm tra tin sắp ra để nhắn Telegram trước giờ ra tin (đặt lịch trước lượt quét đầu tiên vốn có thể chạy lâu)
+  if (CONFIG.newsEnabled) {
+    checkNewsAlerts().catch(logNewsError);
+    cron.schedule('* * * * *', () => {
+      checkNewsAlerts().catch(logNewsError);
+    });
+  }
 
   // Chạy quét ngay lập tức khi khởi động
   await scanMarket();
-
-  // Mỗi phút kiểm tra tin sắp ra để nhắn Telegram trước giờ ra tin
-  if (CONFIG.newsEnabled) {
-    checkNewsAlerts().catch((err) => console.error('❌ [News] Lỗi kiểm tra lịch tin:', err.message));
-    cron.schedule('* * * * *', () => {
-      checkNewsAlerts().catch((err) => console.error('❌ [News] Lỗi kiểm tra lịch tin:', err.message));
-    });
-  }
 
   // Đặt lịch quét định kỳ theo CRON
   cron.schedule(CONFIG.cronSchedule, () => {

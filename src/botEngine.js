@@ -10,6 +10,17 @@ const { getNewsBlackout, describeEvent } = require('./services/newsCalendar');
 // Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản
 const lastAnalyzedCandle = new Map();
 const signalCooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
+// Cooldown riêng cho việc ghi nhận tín hiệu bị AI từ chối, để một setup kéo dài không bị ghi lặp ở mọi nến
+const rejectedCooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
+
+// Khôi phục cooldown từ các tín hiệu đã lưu để khởi động lại bot không phát lại tín hiệu của nến cũ
+try {
+  for (const rec of signalTracker.listSignals()) {
+    (rec.sent ? signalCooldown : rejectedCooldown).record(rec.symbol, rec.action, Date.parse(rec.candleTime));
+  }
+} catch (err) {
+  console.error('❌ [SignalTracker] Không khôi phục được cooldown từ dữ liệu đã lưu:', err.message);
+}
 
 /**
  * Vẽ thanh đo điểm số Confluence trực quan trên console (từ crypto-gold-detector)
@@ -80,7 +91,7 @@ async function scanSingleSymbol(symbol) {
   }
 
   // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó theo các nến mới đóng
-  signalTracker.updateOpenSignals(symbol, marketData.candles);
+  signalTracker.updateOpenSignals(symbol, marketData.candles, marketData.source);
 
   // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
   const lastClosed = marketData.candles[marketData.candles.length - 1];
@@ -171,7 +182,10 @@ async function scanSingleSymbol(symbol) {
     }
 
     // Ghi nhận cả tín hiệu bị AI từ chối để dashboard so sánh được hiệu quả của bộ lọc AI
-    signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered });
+    if (shouldSend || !rejectedCooldown.isCoolingDown(symbol, signal.action, candleTime)) {
+      if (!shouldSend) rejectedCooldown.record(symbol, signal.action, candleTime);
+      signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered, source: marketData.source });
+    }
   }
 }
 

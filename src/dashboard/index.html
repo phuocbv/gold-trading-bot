@@ -300,7 +300,9 @@
   const REFRESH_MS = 60 * 1000;
   const MAX_ROWS = 300;
   const token = new URLSearchParams(location.search).get('token');
-  const withToken = (url) => url + (token ? `?token=${encodeURIComponent(token)}` : '');
+  // API nằm cùng cấp với /dashboard, kể cả khi mở bằng /dashboard/ (dấu / cuối) hoặc sau tiền tố proxy
+  const API_BASE = location.pathname.replace(/dashboard\/?$/, '');
+  const withToken = (url) => API_BASE + url + (token ? `?token=${encodeURIComponent(token)}` : '');
   const API_URL = withToken('api/signals');
   const NEWS_URL = withToken('api/news');
   const IMPACT_LABELS = { High: 'Mạnh', Medium: 'Trung bình', Low: 'Thấp' };

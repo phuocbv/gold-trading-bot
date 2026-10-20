@@ -25,7 +25,9 @@ class SignalCooldown {
   }
 
   record(symbol, action, candleTime) {
-    this.lastSent.set(`${symbol}|${action}`, candleTime);
+    const key = `${symbol}|${action}`;
+    const last = this.lastSent.get(key);
+    this.lastSent.set(key, last != null ? Math.max(last, candleTime) : candleTime);
   }
 }
 
