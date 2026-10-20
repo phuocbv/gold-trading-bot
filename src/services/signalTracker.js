@@ -1,14 +1,27 @@
 const CONFIG = require('../config');
 const { checkCandleHit, rMultiple, primaryStrategyName } = require('../tradeOutcome');
-const { resolveSymbolSources } = require('./marketData');
+const { resolveSymbolSources, timeframeToMs } = require('./marketData');
 const { readJson, writeJson } = require('./jsonStore');
 
 // Danh sách tín hiệu đã ghi nhận, đọc từ file JSON ở lần dùng đầu tiên
 let records = null;
 
 function load() {
-  if (!records) records = readJson(CONFIG.signalDbPath, []);
+  if (!records) {
+    const saved = readJson(CONFIG.signalDbPath, []);
+    records = Array.isArray(saved) ? saved : [];
+  }
   return records;
+}
+
+/**
+ * Khóa định danh luồng giá của một nguồn dữ liệu: cùng sàn + cùng mã thì cùng giá,
+ * vd 'TradingView (BINANCE:ETHUSDT)' và 'Binance Spot (ETHUSDT)' đều là 'BINANCE:ETHUSDT'
+ */
+function feedKey(source) {
+  const match = /\(([^)]+)\)/.exec(source || '');
+  const ticker = (match ? match[1] : source || '').toUpperCase();
+  return /^binance/i.test(source || '') && !ticker.includes(':') ? `BINANCE:${ticker}` : ticker;
 }
 
 function save() {
@@ -58,19 +71,32 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
 
 /**
  * Cập nhật các lệnh đang mở của một tài sản theo các nến đã đóng mới (chạm TP1 / SL / hết hạn)
- * Chỉ dùng nến cùng nguồn dữ liệu với lúc phát tín hiệu: nguồn dự phòng (vd: Binance PAXG thay cho OANDA XAU)
- * lệch giá vài đô sẽ làm chạm SL/TP sai, nên lệnh chờ tới khi có lại dữ liệu đúng nguồn.
+ * Ưu tiên nến cùng luồng giá với lúc phát tín hiệu: nguồn dự phòng (vd: Binance PAXG thay cho OANDA XAU)
+ * lệch giá vài đô sẽ làm chạm SL/TP sai, nên lệnh chờ dữ liệu đúng nguồn. Nếu nguồn gốc mất liên tục
+ * quá thời gian theo dõi (vd: đã đổi TRADINGVIEW_SYMBOL) thì dùng nguồn hiện có để lệnh không bị treo mãi.
  * @param {string} symbol
  * @param {Array<object>} candles - Chỉ gồm các nến đã đóng, cũ nhất -> mới nhất
  * @param {string} [source] - Nguồn dữ liệu của các nến (marketData.source)
+ * @param {number} [now]
  */
-function updateOpenSignals(symbol, candles, source) {
+function updateOpenSignals(symbol, candles, source, now = Date.now()) {
   load();
   let changed = false;
 
   for (const rec of records) {
     if (rec.symbol !== symbol || rec.status !== 'OPEN') continue;
-    if (rec.source && source && rec.source !== source) continue;
+    if (rec.source && source && feedKey(rec.source) !== feedKey(source)) {
+      // Tính từ lúc bắt đầu mất nguồn (không phải lần cập nhật cuối) để khoảng nghỉ cuối tuần không bị tính là mất nguồn
+      if (!rec.feedMissingSince) {
+        rec.feedMissingSince = new Date(now).toISOString();
+        changed = true;
+      }
+      const horizonMs = CONFIG.signalTrackHorizonBars * timeframeToMs(rec.timeframe || CONFIG.timeframe);
+      if (now - Date.parse(rec.feedMissingSince) <= horizonMs) continue;
+    } else if (rec.feedMissingSince) {
+      delete rec.feedMissingSince;
+      changed = true;
+    }
     const checkedUntil = new Date(rec.lastCheckedTime).getTime();
 
     for (const candle of candles) {
@@ -134,4 +160,5 @@ module.exports = {
   updateOpenSignals,
   listSignals,
   describeAsset,
+  feedKey,
 };

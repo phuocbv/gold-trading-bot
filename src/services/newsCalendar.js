@@ -26,7 +26,8 @@ let state = null;
 
 function load() {
   if (!state) {
-    const saved = readJson(CONFIG.newsStatePath, {});
+    const raw = readJson(CONFIG.newsStatePath, {});
+    const saved = raw && typeof raw === 'object' ? raw : {};
     state = {
       fetchedAt: Number(saved.fetchedAt) || 0,
       lastAttemptAt: Number(saved.lastAttemptAt) || 0,

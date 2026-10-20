@@ -7,6 +7,7 @@
  *   node scripts/backtest.js ETH/USDT --binance    # dữ liệu Binance có Delta thật
  *   --horizon 48                                   # số nến tối đa giữ lệnh trước khi chốt theo giá đóng cửa
  *
+ * Các nến đầu (CANDLE_LIMIT) chỉ dùng để khởi tạo chỉ báo, không giao dịch.
  * Kết quả tính theo R (1R = khoảng cách Entry -> SL), chỉ xét TP1, chưa trừ spread/phí.
  * Nếu SL và TP1 cùng nằm trong một nến thì tính là chạm SL (giả định bi quan).
  */
@@ -18,7 +19,8 @@ const { getMinScore, SignalCooldown } = require('../src/signalFilter');
 const { checkCandleHit, rMultiple, primaryStrategyName } = require('../src/tradeOutcome');
 
 const WINDOW = CANDLE_LIMIT; // Số nến đưa vào mỗi lần phân tích, giống dữ liệu bot tải khi chạy thật
-const WARMUP = 260;
+// Chỉ bắt đầu khi đủ WINDOW nến để chỉ báo (EMA200) giống hệt lúc bot chạy thật; các nến trước đó chỉ dùng để khởi tạo
+const WARMUP = WINDOW - 1;
 
 function parseArgs(argv) {
   const args = { symbols: [], bars: 5000, horizon: 48, binance: false };

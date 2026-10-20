@@ -23,6 +23,18 @@ try {
 }
 
 /**
+ * Chạy một tác vụ phụ (thống kê tín hiệu, lịch tin) mà không để lỗi của nó chặn việc quét và phát tín hiệu
+ */
+function runSafely(label, fn, fallback) {
+  try {
+    return fn();
+  } catch (err) {
+    console.error(`❌ [${label}] ${err.message}`);
+    return fallback;
+  }
+}
+
+/**
  * Vẽ thanh đo điểm số Confluence trực quan trên console (từ crypto-gold-detector)
  */
 function renderScoreBar(score) {
@@ -91,7 +103,7 @@ async function scanSingleSymbol(symbol) {
   }
 
   // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó theo các nến mới đóng
-  signalTracker.updateOpenSignals(symbol, marketData.candles, marketData.source);
+  runSafely('SignalTracker', () => signalTracker.updateOpenSignals(symbol, marketData.candles, marketData.source));
 
   // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
   const lastClosed = marketData.candles[marketData.candles.length - 1];
@@ -123,7 +135,8 @@ async function scanSingleSymbol(symbol) {
   }
 
   // Không phát tín hiệu trong khung ±N phút quanh giờ ra tin tác động mạnh (giá giật mạnh, giãn spread)
-  const newsEvents = getNewsBlackout();
+  // Không đọc được lịch tin thì không chặn (đã ghi log lỗi), để lỗi phụ không làm mất tín hiệu
+  const newsEvents = runSafely('News', () => getNewsBlackout(), []);
   if (newsEvents.length > 0) {
     console.log(`⛔ [${snapshot.displayName}] Bỏ qua ${candidateSignals.length} tín hiệu: đang trong khung ±${CONFIG.newsBlackoutMinutes} phút quanh tin ${newsEvents.map(describeEvent).join(', ')}.`);
     return;
@@ -184,7 +197,7 @@ async function scanSingleSymbol(symbol) {
     // Ghi nhận cả tín hiệu bị AI từ chối để dashboard so sánh được hiệu quả của bộ lọc AI
     if (shouldSend || !rejectedCooldown.isCoolingDown(symbol, signal.action, candleTime)) {
       if (!shouldSend) rejectedCooldown.record(symbol, signal.action, candleTime);
-      signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered, source: marketData.source });
+      runSafely('SignalTracker', () => signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered, source: marketData.source }));
     }
   }
 }
