@@ -7,12 +7,33 @@ const TREND_TYPES = ['TREND', 'FLOW', 'BREAKOUT', 'SMC'];
 // Cache chỉ báo theo từng bộ dữ liệu nến để các chiến lược không tính lại cùng một thứ
 const indicatorCache = new WeakMap();
 
+const HOUR_MS = 3600 * 1000;
+const nyDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+// Ngày giao dịch Forex theo từng giờ (nhớ đệm vì Intl chậm khi gọi cho hàng nghìn nến mỗi lượt backtest)
+const forexDayCache = new Map();
+
 /**
- * VWAP neo theo phiên: reset mỗi ngày tại CONFIG.vwapSessionUtcHour (UTC)
- * thay vì cộng dồn từ nến đầu tiên của dữ liệu tải về (mốc neo sẽ trôi theo mỗi lần tải)
+ * Ngày giao dịch Forex/Vàng: phiên mới lúc 17:00 New York (cộng 7 giờ để 17:00 thành 00:00 ngày hôm sau),
+ * tự theo giờ mùa hè/mùa đông giống phiên của TradingView
  */
-function calculateSessionVwap(candles) {
-  const sessionOffsetMs = (CONFIG.vwapSessionUtcHour || 0) * 3600 * 1000;
+function forexSessionDay(time) {
+  const hour = Math.floor(time / HOUR_MS);
+  let day = forexDayCache.get(hour);
+  if (day === undefined) {
+    if (forexDayCache.size > 50000) forexDayCache.clear();
+    day = nyDateFmt.format(new Date(hour * HOUR_MS + 7 * HOUR_MS));
+    forexDayCache.set(hour, day);
+  }
+  return day;
+}
+
+/**
+ * VWAP neo theo phiên thay vì cộng dồn từ nến đầu tiên của dữ liệu tải về (mốc neo sẽ trôi theo mỗi lần tải).
+ * Vàng/Forex reset lúc 17:00 New York; Crypto reset theo CONFIG.vwapSessionUtcHour (mặc định 00:00 UTC).
+ */
+function calculateSessionVwap(candles, isForex) {
+  const sessionOffsetMs = (CONFIG.vwapSessionUtcHour || 0) * HOUR_MS;
+  const sessionOf = isForex ? forexSessionDay : (time) => Math.floor((time - sessionOffsetMs) / 86400000);
   const result = [];
   let session = null;
   let cumulativePv = 0;
@@ -20,7 +41,7 @@ function calculateSessionVwap(candles) {
 
   for (const c of candles) {
     const time = c.date ? new Date(c.date).getTime() : NaN;
-    const candleSession = Number.isNaN(time) ? session : Math.floor((time - sessionOffsetMs) / 86400000);
+    const candleSession = Number.isNaN(time) ? session : sessionOf(time);
     if (candleSession !== session) {
       session = candleSession;
       cumulativePv = 0;
@@ -112,7 +133,7 @@ class BaseStrategy {
 
     if (hasValidVolume) {
       if (data.candles && data.candles.length === closes.length) {
-        vwapResult = calculateSessionVwap(data.candles);
+        vwapResult = calculateSessionVwap(data.candles, data.isCrypto === false);
       }
       try {
         mfiResult = MFI.calculate({ high: highs, low: lows, close: closes, volume: volumes, period: 14 }) || [];

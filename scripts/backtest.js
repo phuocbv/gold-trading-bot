@@ -12,12 +12,12 @@
  */
 const axios = require('axios');
 const CONFIG = require('../src/config');
-const { fetchTradingViewCandles, resolveSymbolSources, getClosedCandles, timeframeToMs } = require('../src/services/marketData');
+const { fetchTradingViewCandles, resolveSymbolSources, getClosedCandles, timeframeToMs, CANDLE_LIMIT } = require('../src/services/marketData');
 const { evaluateAllStrategies } = require('../src/strategies');
 const { getMinScore, SignalCooldown } = require('../src/signalFilter');
 const { checkCandleHit, rMultiple, primaryStrategyName } = require('../src/tradeOutcome');
 
-const WINDOW = 500; // Số nến đưa vào mỗi lần phân tích, giống dữ liệu bot tải khi chạy thật
+const WINDOW = CANDLE_LIMIT; // Số nến đưa vào mỗi lần phân tích, giống dữ liệu bot tải khi chạy thật
 const WARMUP = 260;
 
 function parseArgs(argv) {
@@ -62,13 +62,13 @@ async function loadCandles(symbol, args) {
   const sources = resolveSymbolSources(symbol);
   if (args.binance) {
     const candles = await fetchBinanceHistory(sources.binanceSymbol, CONFIG.timeframe, args.bars);
-    return { candles, hasRealDelta: true, source: `Binance (${sources.binanceSymbol})` };
+    return { candles, hasRealDelta: true, isCrypto: sources.isCrypto, source: `Binance (${sources.binanceSymbol})` };
   }
   const data = await fetchTradingViewCandles(sources.tradingViewSymbol, CONFIG.timeframe, args.bars);
-  return { candles: data.candles, hasRealDelta: false, source: data.source };
+  return { candles: data.candles, hasRealDelta: false, isCrypto: sources.isCrypto, source: data.source };
 }
 
-function toMarketData(candles, hasRealDelta) {
+function toMarketData(candles, hasRealDelta, isCrypto) {
   return {
     candles,
     closes: candles.map((c) => c.close),
@@ -77,6 +77,7 @@ function toMarketData(candles, hasRealDelta) {
     opens: candles.map((c) => c.open),
     volumes: candles.map((c) => c.volume),
     hasRealDelta,
+    isCrypto,
   };
 }
 
@@ -106,13 +107,13 @@ function summarize(trades) {
 }
 
 async function backtestSymbol(symbol, args) {
-  const { candles: allCandles, hasRealDelta, source } = await loadCandles(symbol, args);
+  const { candles: allCandles, hasRealDelta, isCrypto, source } = await loadCandles(symbol, args);
   const candles = getClosedCandles({ candles: allCandles }, CONFIG.timeframe).candles;
   const cooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
   const trades = [];
 
   for (let i = WARMUP; i < candles.length - 1; i++) {
-    const marketData = toMarketData(candles.slice(Math.max(0, i + 1 - WINDOW), i + 1), hasRealDelta);
+    const marketData = toMarketData(candles.slice(Math.max(0, i + 1 - WINDOW), i + 1), hasRealDelta, isCrypto);
     const candleTime = candles[i].date.getTime();
 
     for (const signal of evaluateAllStrategies(marketData, { silent: true })) {

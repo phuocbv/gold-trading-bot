@@ -7,6 +7,10 @@ const CONFIG = require('../config');
 // Bộ nhớ cache tạm thời trong cùng một chu kỳ quét
 const cache = new Map();
 
+// Số nến tải về cho mỗi lần phân tích: đủ dài để EMA200 hội tụ về đúng giá trị như trên chart TradingView
+// (500 nến làm EMA200 lệch ~$0.5 với Vàng do phần khởi tạo chưa phai hết)
+const CANDLE_LIMIT = 1000;
+
 // Headers giả lập trình duyệt để tránh bị WAF/Cloudflare của Binance chặn (lỗi 418)
 const HTTP_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -499,9 +503,10 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
   // Chiến lược 1: Ưu tiên TradingView Direct Datafeed
   if (sourcePreference === 'TRADINGVIEW') {
     try {
-      const data = await fetchTradingViewCandles(resolved.tradingViewSymbol, interval, 500);
+      const data = await fetchTradingViewCandles(resolved.tradingViewSymbol, interval, CANDLE_LIMIT);
       data.symbol = resolved.rawSymbol;
       data.displayName = resolved.displayName;
+      data.isCrypto = resolved.isCrypto;
       cache.set(cacheKey, { timestamp: now, data });
       return data;
     } catch (tvError) {
@@ -511,9 +516,10 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
 
   // Chiến lược 2: Binance Spot (PAXGUSDT, ETHUSDT, BTCUSDT) - Dữ liệu Order Flow chuẩn
   try {
-    const data = await fetchBinanceKlines(resolved.binanceSymbol, interval, 500);
+    const data = await fetchBinanceKlines(resolved.binanceSymbol, interval, CANDLE_LIMIT);
     data.symbol = resolved.rawSymbol;
     data.displayName = resolved.displayName;
+    data.isCrypto = resolved.isCrypto;
     cache.set(cacheKey, { timestamp: now, data });
     return data;
   } catch (binanceError) {
@@ -525,6 +531,7 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
     const data = await fetchYahooCandles(resolved.yahooSymbol, interval, daysBack);
     data.symbol = resolved.rawSymbol;
     data.displayName = resolved.displayName;
+    data.isCrypto = resolved.isCrypto;
     cache.set(cacheKey, { timestamp: now, data });
     return data;
   } catch (fbErr) {
@@ -598,4 +605,5 @@ module.exports = {
   resolveTradingViewSymbol,
   timeframeToMs,
   getClosedCandles,
+  CANDLE_LIMIT,
 };
