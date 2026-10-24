@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node bot.js",
     "dev": "node --watch bot.js",
-    "backtest": "node scripts/backtest.js"
+    "backtest": "node scripts/backtest.js",
+    "backtest:report": "node scripts/backtestReport.js"
   },
   "engines": {
     "node": ">=20.0.0"

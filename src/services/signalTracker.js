@@ -66,7 +66,7 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
     takeProfit2: signal.takeProfit2 || null,
     score: signal.score ?? null,
     candleTime: signalTime,
-    timeframe: CONFIG.timeframe,
+    timeframe: signal.timeframe || CONFIG.timeframe,
     source: source || null,
     sent,
     delivered: Boolean(delivered),
@@ -90,14 +90,16 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
  * nguồn gốc mất liên tục quá thời gian theo dõi (vd: đã đổi TRADINGVIEW_SYMBOL) để lệnh không bị treo mãi.
  * @param {string} symbol
  * @param {Array<object>} candles - Chỉ gồm các nến đã đóng, cũ nhất -> mới nhất
- * @param {object} [feed] - { source: marketData.source, isFallback: nến từ nguồn dự phòng, now }
+ * @param {object} [feed] - { source: marketData.source, isFallback: nến từ nguồn dự phòng, timeframe: khung của các nến, now }
  */
-function updateOpenSignals(symbol, candles, { source, isFallback = true, now = Date.now() } = {}) {
+function updateOpenSignals(symbol, candles, { source, isFallback = true, timeframe = CONFIG.timeframe, now = Date.now() } = {}) {
   load();
   let changed = false;
 
   for (const rec of records) {
     if (rec.symbol !== symbol || rec.status !== 'OPEN') continue;
+    // Lệnh chỉ được chấm bằng nến cùng khung thời gian với lúc phát tín hiệu (thời gian theo dõi tính theo số nến của khung đó)
+    if ((rec.timeframe || CONFIG.timeframe) !== timeframe) continue;
     if (isFallback && rec.source && source && feedKey(rec.source) !== feedKey(source)) {
       // Tính từ lúc bắt đầu mất nguồn (không phải lần cập nhật cuối) để khoảng nghỉ cuối tuần không bị tính là mất nguồn
       if (!rec.feedMissingSince) {

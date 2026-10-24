@@ -436,6 +436,8 @@ class BaseStrategy {
 
     const signal = {
       strategy: this.name,
+      // Ngưỡng điểm riêng của chiến lược (nếu có), vd: quy tắc đã kiểm chứng bằng backtest không cần lọc theo điểm
+      ...(this.minScore != null ? { minScore: this.minScore } : {}),
       action,
       entry,
       stopLoss,

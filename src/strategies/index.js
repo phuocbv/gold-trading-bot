@@ -6,27 +6,61 @@ const SmcOrderBlockStrategy = require('./smcOrderBlock');
 const RsiDivergenceStrategy = require('./rsiDivergence');
 const VolumeVwapAdxStrategy = require('./volumeVwapAdx');
 const OrderFlowReversalStrategy = require('./orderFlowReversal');
+const DonchianBreakoutStrategy = require('./donchianBreakout');
+const CONFIG = require('../config');
 
-const strategies = [
-  new TrendFollowingStrategy(),
-  new MeanReversionStrategy(),
-  new BreakoutAtrStrategy(),
-  new SmcOrderBlockStrategy(),
-  new RsiDivergenceStrategy(),
-  new VolumeVwapAdxStrategy(),
-  new OrderFlowReversalStrategy(),
-];
+// Danh mục chiến lược theo tên khóa dùng trong cấu hình STRATEGIES
+const registry = {
+  'trend-following': new TrendFollowingStrategy(),
+  'mean-reversion': new MeanReversionStrategy(),
+  'volatility-breakout': new BreakoutAtrStrategy(),
+  'smc-lite': new SmcOrderBlockStrategy(),
+  'rsi-divergence': new RsiDivergenceStrategy(),
+  'smart-money-flow': new VolumeVwapAdxStrategy(),
+  'order-flow': new OrderFlowReversalStrategy(),
+  'donchian-55': new DonchianBreakoutStrategy(55),
+};
+for (const [key, strat] of Object.entries(registry)) strat.key = key;
+
+const strategies = Object.values(registry);
+
+let defaultPlan = null;
 
 /**
- * Chạy tất cả các chiến lược trên tập dữ liệu nến hiện tại và tính toán hợp lưu & xếp hạng
+ * Kế hoạch chạy theo cấu hình STRATEGIES: Map(khung thời gian -> danh sách chiến lược), giữ thứ tự khai báo
+ */
+function getStrategyPlan(plan = null) {
+  if (!plan) {
+    if (!defaultPlan) defaultPlan = getStrategyPlan(CONFIG.strategyPlan);
+    return defaultPlan;
+  }
+  const byTimeframe = new Map();
+  for (const { key, timeframe } of plan) {
+    const strat = registry[key];
+    if (!strat) {
+      console.warn(`⚠️ [Strategies] Không có chiến lược "${key}" (có: ${Object.keys(registry).join(', ')}), bỏ qua.`);
+      continue;
+    }
+    if (!/^\d+[mhdw]$/.test(timeframe)) {
+      console.warn(`⚠️ [Strategies] Khung thời gian "${timeframe}" của "${key}" không hợp lệ (vd: 15m, 1h, 4h), bỏ qua.`);
+      continue;
+    }
+    if (!byTimeframe.has(timeframe)) byTimeframe.set(timeframe, []);
+    if (!byTimeframe.get(timeframe).includes(strat)) byTimeframe.get(timeframe).push(strat);
+  }
+  return byTimeframe;
+}
+
+/**
+ * Chạy các chiến lược trên tập dữ liệu nến hiện tại và tính toán hợp lưu & xếp hạng
  * @param {object} marketData - Dữ liệu nến (chỉ gồm các nến đã đóng)
- * @param {object} [options] - { silent: true } để tắt log (dùng cho backtest)
+ * @param {object} [options] - { silent: true } để tắt log (dùng cho backtest), { strategies } để chỉ chạy một số chiến lược
  * @returns {Array<object>} Danh sách các tín hiệu đã được chấm điểm, xếp hạng và sắp xếp từ cao xuống thấp
  */
 function evaluateAllStrategies(marketData, options = {}) {
   const rawSignals = [];
 
-  for (const strat of strategies) {
+  for (const strat of options.strategies || strategies) {
     try {
       const signal = strat.analyze(marketData);
       if (signal) {
@@ -108,5 +142,7 @@ function evaluateAllStrategies(marketData, options = {}) {
 
 module.exports = {
   strategies,
+  registry,
+  getStrategyPlan,
   evaluateAllStrategies,
 };

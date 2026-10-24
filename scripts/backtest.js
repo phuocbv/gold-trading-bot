@@ -1,37 +1,51 @@
 /**
- * Backtest walk-forward toàn bộ chiến lược với đúng quy trình lọc của bot (ngưỡng điểm + cooldown), không gồm AI.
+ * Backtest walk-forward với đúng quy trình lọc của bot (hợp lưu, ngưỡng điểm, cooldown), không gồm AI.
  *
  * Cách dùng:
- *   node scripts/backtest.js                       # các mã trong SYMBOLS, dữ liệu TradingView
- *   node scripts/backtest.js XAU/USD --bars 5000   # số nến lịch sử (TradingView tối đa ~5000)
- *   node scripts/backtest.js ETH/USDT --binance    # dữ liệu Binance có Delta thật
- *   --horizon 48                                   # số nến tối đa giữ lệnh trước khi chốt theo giá đóng cửa
+ *   node scripts/backtest.js                          # các mã trong SYMBOLS, mọi khung trong STRATEGIES
+ *   node scripts/backtest.js XAU/USD --timeframe 4h   # chỉ một khung (chiến lược theo STRATEGIES của khung đó)
+ *   --strategies donchian-55,trend-following          # chọn chiến lược (bỏ qua STRATEGIES)
+ *   --bars 6000                                       # số nến lịch sử (mặc định như báo cáo: 15m 6000, 30m 10000, 1h 11000, 4h 6000)
+ *   --binance                                         # dữ liệu Binance có Delta thật (crypto)
+ *   --horizon 48                                      # số nến tối đa giữ lệnh trước khi chốt theo giá đóng cửa
+ *   --spread 0.35                                     # chi phí mỗi lệnh (mặc định: Vàng $0.35, Crypto 0.1% x 2 chiều)
  *
- * Các nến đầu (CANDLE_LIMIT) chỉ dùng để khởi tạo chỉ báo, không giao dịch.
- * Kết quả tính theo R (1R = khoảng cách Entry -> SL), chỉ xét TP1, chưa trừ spread/phí.
+ * CANDLE_LIMIT nến đầu chỉ dùng để khởi tạo chỉ báo, không giao dịch. Kết quả tính theo R (1R = Entry -> SL), chỉ xét TP1.
  * Nếu SL và TP1 cùng nằm trong một nến thì tính là chạm SL (giả định bi quan).
  */
 const axios = require('axios');
 const CONFIG = require('../src/config');
-const { fetchTradingViewCandles, resolveSymbolSources, getClosedCandles, timeframeToMs, CANDLE_LIMIT } = require('../src/services/marketData');
-const { evaluateAllStrategies } = require('../src/strategies');
-const { getMinScore, SignalCooldown } = require('../src/signalFilter');
-const { checkCandleHit, rMultiple, primaryStrategyName } = require('../src/tradeOutcome');
-
-const WINDOW = CANDLE_LIMIT; // Số nến đưa vào mỗi lần phân tích, giống dữ liệu bot tải khi chạy thật
-// Chỉ bắt đầu khi đủ WINDOW nến để chỉ báo (EMA200) giống hệt lúc bot chạy thật; các nến trước đó chỉ dùng để khởi tạo
-const WARMUP = WINDOW - 1;
+const { fetchTradingViewHistory, resolveSymbolSources, getClosedCandles, CANDLE_LIMIT } = require('../src/services/marketData');
+const { registry, getStrategyPlan } = require('../src/strategies');
+const { runBacktest, summarize, costLabel, DEFAULT_BARS } = require('../src/backtest/engine');
 
 function parseArgs(argv) {
-  const args = { symbols: [], bars: 5000, horizon: 48, binance: false };
+  const args = { symbols: [], bars: null, horizon: CONFIG.signalTrackHorizonBars, binance: false, timeframe: null, strategies: null, spread: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--bars') args.bars = parseInt(argv[++i], 10);
     else if (argv[i] === '--horizon') args.horizon = parseInt(argv[++i], 10);
     else if (argv[i] === '--binance') args.binance = true;
+    else if (argv[i] === '--timeframe') args.timeframe = argv[++i].toLowerCase();
+    else if (argv[i] === '--strategies') args.strategies = argv[++i].split(',').map((k) => k.trim().toLowerCase());
+    else if (argv[i] === '--spread') args.spread = parseFloat(argv[++i]);
     else args.symbols.push(argv[i]);
   }
   if (args.symbols.length === 0) args.symbols = CONFIG.symbols;
   return args;
+}
+
+/**
+ * Các khung thời gian và chiến lược cần chạy: theo --timeframe/--strategies, hoặc theo cấu hình STRATEGIES
+ */
+function buildRuns(args) {
+  const plan = getStrategyPlan();
+  const pick = (keys) => keys.map((k) => registry[k]).filter(Boolean);
+  if (args.timeframe) {
+    const list = args.strategies ? pick(args.strategies) : (plan.get(args.timeframe) || []);
+    return [[args.timeframe, list]];
+  }
+  if (args.strategies) return [[CONFIG.timeframe, pick(args.strategies)]];
+  return [...plan.entries()];
 }
 
 async function fetchBinanceHistory(binanceSymbol, interval, bars) {
@@ -60,100 +74,70 @@ async function fetchBinanceHistory(binanceSymbol, interval, bars) {
   });
 }
 
-async function loadCandles(symbol, args) {
+async function loadCandles(symbol, timeframe, args) {
   const sources = resolveSymbolSources(symbol);
   if (args.binance) {
-    const candles = await fetchBinanceHistory(sources.binanceSymbol, CONFIG.timeframe, args.bars);
-    return { candles, hasRealDelta: true, isCrypto: sources.isCrypto, source: `Binance (${sources.binanceSymbol})` };
+    const candles = await fetchBinanceHistory(sources.binanceSymbol, timeframe, args.bars || DEFAULT_BARS[timeframe] || 6000);
+    return { candles, hasRealDelta: true, source: `Binance (${sources.binanceSymbol})` };
   }
-  const data = await fetchTradingViewCandles(sources.tradingViewSymbol, CONFIG.timeframe, args.bars);
-  return { candles: data.candles, hasRealDelta: false, isCrypto: sources.isCrypto, source: data.source };
+  const candles = await fetchTradingViewHistory(sources.tradingViewSymbol, timeframe, args.bars || DEFAULT_BARS[timeframe] || 6000);
+  return { candles, hasRealDelta: false, source: `TradingView (${sources.tradingViewSymbol})` };
 }
 
-function toMarketData(candles, hasRealDelta, isCrypto) {
+function row(summary) {
   return {
-    candles,
-    closes: candles.map((c) => c.close),
-    highs: candles.map((c) => c.high),
-    lows: candles.map((c) => c.low),
-    opens: candles.map((c) => c.open),
-    volumes: candles.map((c) => c.volume),
-    hasRealDelta,
-    isCrypto,
+    'lệnh': summary.trades,
+    'thắng%': summary.winRate != null ? `${Math.round(summary.winRate * 100)}%` : '-',
+    'R/lệnh': summary.avgR,
+    'R/lệnh sau phí': summary.avgNet,
+    'tổng R sau phí': summary.totalNet,
+    PF: summary.profitFactor,
+    'sụt max R': summary.maxDrawdown,
+    'đầu R/lệnh': summary.early.avgNet,
+    'sau R/lệnh': summary.late.avgNet,
   };
 }
 
-/**
- * Kết quả lệnh tính theo R: chạm TP1 = +R:R, chạm SL = -1, hết horizon = lãi/lỗ theo giá đóng cửa
- */
-function simulate(candles, index, signal, horizon) {
-  const lastIndex = Math.min(candles.length - 1, index + horizon);
-
-  for (let j = index + 1; j <= lastIndex; j++) {
-    const hit = checkCandleHit(signal, candles[j]);
-    if (hit) return { outcome: hit, r: rMultiple(signal, hit === 'SL' ? signal.stopLoss : signal.takeProfit) };
-  }
-  return { outcome: 'OPEN', r: rMultiple(signal, candles[lastIndex].close) };
-}
-
-function summarize(trades) {
-  const wins = trades.filter((t) => t.outcome === 'TP').length;
-  const losses = trades.filter((t) => t.outcome === 'SL').length;
-  const totalR = trades.reduce((sum, t) => sum + t.r, 0);
-  return {
-    trades: trades.length,
-    winRate: wins + losses > 0 ? `${Math.round((wins / (wins + losses)) * 100)}%` : '-',
-    avgR: trades.length > 0 ? +(totalR / trades.length).toFixed(3) : 0,
-    totalR: +totalR.toFixed(1),
-  };
-}
-
-async function backtestSymbol(symbol, args) {
-  const { candles: allCandles, hasRealDelta, isCrypto, source } = await loadCandles(symbol, args);
-  const candles = getClosedCandles({ candles: allCandles }, CONFIG.timeframe).candles;
-  if (candles.length < WARMUP + 2) {
-    console.log(`\n⚠️ ${symbol}: chỉ có ${candles.length} nến đã đóng, cần tối thiểu ${WARMUP + 2} (${WINDOW} nến khởi tạo chỉ báo). Tăng --bars.`);
+async function backtestSymbol(symbol, timeframe, strategyList, args) {
+  if (strategyList.length === 0) {
+    console.log(`\n⚠️ ${symbol} ${timeframe}: không có chiến lược nào để chạy.`);
     return;
   }
-  const cooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
-  const trades = [];
-
-  for (let i = WARMUP; i < candles.length - 1; i++) {
-    const marketData = toMarketData(candles.slice(Math.max(0, i + 1 - WINDOW), i + 1), hasRealDelta, isCrypto);
-    const candleTime = candles[i].date.getTime();
-
-    for (const signal of evaluateAllStrategies(marketData, { silent: true })) {
-      if (signal.score < getMinScore(signal)) continue;
-      if (cooldown.isCoolingDown(symbol, signal.action, candleTime)) continue;
-      cooldown.record(symbol, signal.action, candleTime);
-
-      const primary = primaryStrategyName(signal.strategy);
-      trades.push({ primary, score: signal.score, ...simulate(candles, i, signal, args.horizon) });
-    }
+  const { candles: allCandles, hasRealDelta, source } = await loadCandles(symbol, timeframe, args);
+  const candles = getClosedCandles({ candles: allCandles }, timeframe).candles;
+  if (candles.length < CANDLE_LIMIT + 1) {
+    console.log(`\n⚠️ ${symbol} ${timeframe}: chỉ có ${candles.length} nến đã đóng, cần tối thiểu ${CANDLE_LIMIT + 1} (${CANDLE_LIMIT} nến khởi tạo chỉ báo). Tăng --bars.`);
+    return;
   }
 
-  const from = candles[WARMUP].date.toISOString().slice(0, 10);
+  const { combined, warmup } = runBacktest({ symbol, candles, timeframe, strategies: strategyList, horizon: args.horizon, spread: args.spread, hasRealDelta });
+  const split = warmup + Math.floor((candles.length - warmup) * 0.6);
+  const from = candles[warmup].date.toISOString().slice(0, 10);
   const to = candles[candles.length - 1].date.toISOString().slice(0, 10);
-  console.log(`\n📊 ${symbol} | ${source} | ${CONFIG.timeframe} | ${from} → ${to} | horizon ${args.horizon} nến`);
+  console.log(`\n📊 ${symbol} | ${source} | ${timeframe} | ${from} → ${to} | giai đoạn sau từ ${candles[split].date.toISOString().slice(0, 10)} | horizon ${args.horizon} nến | ${costLabel(symbol, args.spread)}`);
+  console.log(`   Chiến lược: ${strategyList.map((s) => s.key).join(', ')}`);
 
   const rows = {};
-  for (const name of [...new Set(trades.map((t) => t.primary))].sort()) {
-    rows[name] = summarize(trades.filter((t) => t.primary === name));
+  for (const name of [...new Set(combined.map((t) => t.strategy))].sort()) {
+    rows[name] = row(summarize(combined.filter((t) => t.strategy === name), split));
   }
-  rows['TỔNG'] = summarize(trades);
+  rows['TỔNG'] = row(summarize(combined, split));
   console.table(rows);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const runs = buildRuns(args);
   for (const symbol of args.symbols) {
-    try {
-      await backtestSymbol(symbol, args);
-    } catch (err) {
-      console.error(`❌ Backtest ${symbol} thất bại:`, err.message);
+    for (const [timeframe, strategyList] of runs) {
+      try {
+        await backtestSymbol(symbol, timeframe, strategyList, args);
+      } catch (err) {
+        console.error(`❌ Backtest ${symbol} ${timeframe} thất bại:`, err.message);
+      }
     }
   }
-  console.log('\nLưu ý: chưa gồm bộ lọc AI, spread và phí giao dịch. Kết quả quá khứ không đảm bảo tương lai.');
+  console.log('\nLưu ý: chưa gồm bộ lọc AI. "Đầu"/"sau" là 60% đầu và 40% sau của giai đoạn giao dịch. Kết quả quá khứ không đảm bảo tương lai.');
   process.exit(0);
 }
 

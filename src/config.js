@@ -23,13 +23,26 @@ function parseList(raw) {
 }
 
 const rawSymbols = process.env.SYMBOLS || process.env.SYMBOL || 'XAU/USD';
+const timeframe = process.env.TIMEFRAME || '15m';
+
+// Phương pháp và khung thời gian chạy: "tên@khung" cách nhau bởi dấu phẩy; thiếu "@khung" thì dùng TIMEFRAME.
+// Donchian 55 đạt chuẩn backtest rõ nhất ở khung 4h (lỗ ở 15m); khung 1h đạt chuẩn sát ngưỡng và đang lỗ
+// trong vài tháng gần nhất nên mặc định chưa bật (thêm "donchian-55@1h" vào STRATEGIES nếu muốn chạy).
+const DEFAULT_STRATEGIES = 'trend-following,mean-reversion,volatility-breakout,smc-lite,rsi-divergence,smart-money-flow,order-flow,donchian-55@4h';
+function parseStrategyPlan(raw) {
+  return parseList(raw).map((entry) => {
+    const [key, tf] = entry.split('@');
+    return { key: key.trim().toLowerCase(), timeframe: (tf || timeframe).trim().toLowerCase() };
+  });
+}
 const parsedSymbols = rawSymbols.split(',').map((s) => s.trim()).filter(Boolean);
 
 const CONFIG = {
   // Cấu hình thị trường & Nguồn dữ liệu (Hỗ trợ đa tài sản Vàng & Crypto)
   symbols: parsedSymbols.length > 0 ? parsedSymbols : ['XAU/USD'],
   symbol: parsedSymbols[0] || 'XAU/USD',
-  timeframe: process.env.TIMEFRAME || '15m',
+  timeframe,
+  strategyPlan: parseStrategyPlan(process.env.STRATEGIES || DEFAULT_STRATEGIES),
   higherTimeframe: process.env.HIGHER_TIMEFRAME || '1h',
   cronSchedule: process.env.CRON_SCHEDULE || '*/5 * * * *',
   minConfluenceScore: parseInt(process.env.MIN_CONFLUENCE_SCORE || '65', 10),
@@ -78,6 +91,12 @@ const CONFIG = {
   newsFeedUrls: parseList(process.env.NEWS_FEED_URLS ||
     'https://nfs.faireconomy.media/ff_calendar_thisweek.json,https://nfs.faireconomy.media/ff_calendar_nextweek.json'),
   newsStatePath: process.env.NEWS_STATE_PATH || path.join(__dirname, '..', 'data', 'news.json'),
+
+  // Báo cáo backtest trên dashboard: chạy định kỳ ở tiến trình riêng (mặc định 9:00 Chủ nhật, thị trường Vàng nghỉ)
+  backtestReportEnabled: process.env.BACKTEST_REPORT_ENABLED !== 'false',
+  backtestReportCron: process.env.BACKTEST_REPORT_CRON || '0 9 * * 0',
+  backtestReportTimeframes: parseList(process.env.BACKTEST_REPORT_TIMEFRAMES || '15m,30m,1h,4h').map((t) => t.toLowerCase()),
+  backtestReportPath: process.env.BACKTEST_REPORT_PATH || path.join(__dirname, '..', 'data', 'backtest-report.json'),
 };
 
 module.exports = CONFIG;

@@ -1,8 +1,10 @@
 const CONFIG = require('../config');
 const { listSignals, describeAsset } = require('../services/signalTracker');
 const { getNewsOverview } = require('../services/newsCalendar');
-const { strategies } = require('../strategies');
+const { getStrategyPlan } = require('../strategies');
 const { primaryStrategyName } = require('../tradeOutcome');
+const { readJson } = require('../services/jsonStore');
+const { getReportJobStatus } = require('../backtest/reportJob');
 
 /**
  * Chặn truy cập dashboard khi có cấu hình DASHBOARD_TOKEN mà URL không kèm ?token= đúng
@@ -30,14 +32,24 @@ function registerDashboard(app) {
       timeframe: CONFIG.timeframe,
       horizonBars: CONFIG.signalTrackHorizonBars,
       assets: symbols.map(describeAsset),
-      // Toàn bộ phương pháp đang chạy, để bộ lọc có đủ lựa chọn kể cả khi chưa có tín hiệu nào
-      strategies: strategies.map((s) => primaryStrategyName(s.name)),
+      // Phương pháp và khung đang chạy, để bộ lọc có đủ lựa chọn kể cả khi chưa có tín hiệu nào
+      strategies: [...new Set([...getStrategyPlan().values()].flat().map((s) => primaryStrategyName(s.name)))],
+      timeframes: [...getStrategyPlan().keys()],
       records,
     });
   });
 
   app.get('/api/news', requireToken, (req, res) => {
     res.json(getNewsOverview());
+  });
+
+  app.get('/api/backtest', requireToken, (req, res) => {
+    res.json({
+      report: readJson(CONFIG.backtestReportPath, null),
+      job: getReportJobStatus(),
+      // Phương pháp đang bật theo từng khung, để báo cáo đánh dấu đúng kể cả khi cấu hình đổi sau lần chạy báo cáo
+      active: Object.fromEntries([...getStrategyPlan()].map(([tf, list]) => [tf, list.map((s) => s.key)])),
+    });
   });
 }
 

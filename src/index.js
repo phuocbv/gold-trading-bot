@@ -1,10 +1,10 @@
 const cron = require('node-cron');
 const express = require('express');
 const CONFIG = require('./config');
-const { scanMarket, runMarketBriefing } = require('./botEngine');
-const { strategies } = require('./strategies');
+const { scanMarket, runMarketBriefing, strategyPlan } = require('./botEngine');
 const { registerDashboard } = require('./dashboard/server');
 const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
+const { startReportJob, reportAgeMs } = require('./backtest/reportJob');
 
 function logNewsError(err) {
   console.error('❌ [News] Lỗi lịch tin tức:', err.message);
@@ -27,10 +27,11 @@ async function startBot() {
     ? `BẬT (${CONFIG.newsCurrencies.join('/')} mức ${CONFIG.newsImpacts.join('/')} | nhắn trước ${CONFIG.newsAlertMinutes} phút | chặn tín hiệu ±${CONFIG.newsBlackoutMinutes} phút)`
     : 'TẮT';
   console.log(`📰 Lịch tin tức: ${newsStatus}`);
-  console.log(`📈 Chiến lược kích hoạt (${strategies.length}):`);
-  strategies.forEach((s, idx) => {
-    console.log(`   ${idx + 1}. ${s.name}`);
-  });
+  const activeCount = [...strategyPlan.values()].reduce((sum, list) => sum + list.length, 0);
+  console.log(`📈 Chiến lược kích hoạt (${activeCount}) theo khung thời gian:`);
+  for (const [timeframe, list] of strategyPlan) {
+    console.log(`   [${timeframe}] ${list.map((s) => s.name.split(' (')[0]).join(', ')}`);
+  }
   console.log('====================================================');
 
   // Chế độ quét một lần (--once)
@@ -79,6 +80,12 @@ async function startBot() {
   cron.schedule(CONFIG.cronSchedule, () => {
     scanMarket();
   });
+
+  // Báo cáo backtest cho dashboard: tạo ngay nếu chưa có hoặc đã cũ hơn 7 ngày, sau đó chạy định kỳ
+  if (CONFIG.backtestReportEnabled) {
+    if (reportAgeMs() > 7 * 24 * 3600 * 1000) startReportJob('chưa có báo cáo hoặc báo cáo đã cũ');
+    cron.schedule(CONFIG.backtestReportCron, () => startReportJob('lịch định kỳ'));
+  }
 
   // Đặt lịch gửi bản tin AI Briefing lúc 13:00 (đầu phiên Âu) và 19:30 (đầu phiên Mỹ) theo giờ VN
   cron.schedule('0 13,19 * * 1-5', () => {

@@ -108,7 +108,8 @@
   .segmented { display: inline-flex; }
   .segmented button { cursor: pointer; border-radius: 0; color: var(--text-2); }
   .segmented button:first-child { border-radius: 8px 0 0 8px; }
-  .segmented button:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+  .segmented button:last-child { border-radius: 0 8px 8px 0; }
+  .segmented button + button { margin-left: -1px; }
   .segmented button[aria-pressed="true"] { color: var(--text-1); font-weight: 600; background: var(--hover); }
   .sizes { display: flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 12px; align-items: flex-end; }
   .sizes .hint { font-size: 12px; color: var(--muted); padding-bottom: 8px; }
@@ -194,6 +195,20 @@
   }
   tr.past td { color: var(--muted); }
   .footnote { color: var(--muted); font-size: 12px; margin-top: 16px; line-height: 1.6; }
+
+  .tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--axis); overflow-x: auto; }
+  .tabs button {
+    font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: 8px 12px; margin-bottom: -1px; color: var(--text-2); cursor: pointer; white-space: nowrap;
+  }
+  .tabs button[aria-selected="true"] { color: var(--text-1); font-weight: 600; border-bottom-color: var(--text-1); }
+  .matrix td { vertical-align: top; }
+  .mx-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mx-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .mx-badges { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; font-size: 12px; }
+  .pill { border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; color: var(--text-1); font-size: 12px; }
+  .criteria { margin: 8px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+  .bt-info { color: var(--text-2); font-size: 13px; margin: 0 0 12px; }
 </style>
 </head>
 <body>
@@ -205,6 +220,12 @@
 
   <div class="error" id="error" hidden></div>
 
+  <nav class="tabs" role="tablist" aria-label="Chế độ xem">
+    <button type="button" role="tab" id="tab-live" data-view="live" aria-controls="view-live">Tín hiệu thực tế</button>
+    <button type="button" role="tab" id="tab-backtest" data-view="backtest" aria-controls="view-backtest">Báo cáo backtest</button>
+  </nav>
+
+  <div id="view-live" role="tabpanel" aria-labelledby="tab-live">
   <section class="card" id="news-card" hidden>
     <div class="card-head">
       <div>
@@ -230,6 +251,9 @@
     </label>
     <label class="field">Phương pháp
       <select id="f-strategy"></select>
+    </label>
+    <label class="field">Khung
+      <select id="f-timeframe"></select>
     </label>
     <label class="field">Tín hiệu
       <select id="f-sent">
@@ -292,6 +316,21 @@
 
     <p class="footnote" id="footnote"></p>
   </div>
+  </div>
+
+  <div id="view-backtest" role="tabpanel" aria-labelledby="tab-backtest" hidden>
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Báo cáo backtest</h2>
+          <p class="note" id="bt-note">Đang tải báo cáo…</p>
+        </div>
+      </div>
+      <div id="bt-criteria"></div>
+    </section>
+    <div id="bt-body"></div>
+    <p class="footnote" id="bt-footnote"></p>
+  </div>
 </main>
 
 <script>
@@ -305,6 +344,7 @@
   const withToken = (url) => API_BASE + url + (token ? `?token=${encodeURIComponent(token)}` : '');
   const API_URL = withToken('api/signals');
   const NEWS_URL = withToken('api/news');
+  const BACKTEST_URL = withToken('api/backtest');
   const IMPACT_LABELS = { High: 'Mạnh', Medium: 'Trung bình', Low: 'Thấp' };
   const STATUS = {
     TP: { cls: 'tp', icon: '✓', label: 'Chạm TP1' },
@@ -316,7 +356,10 @@
   const state = {
     data: null,
     news: null,
-    filters: { range: 'ALL', symbol: 'ALL', strategy: 'ALL', sent: 'SENT', unit: 'USD' },
+    backtest: null,
+    view: 'live',
+    btTimeframe: null,
+    filters: { range: 'ALL', symbol: 'ALL', strategy: 'ALL', timeframe: 'ALL', sent: 'SENT', unit: 'USD' },
     sizes: {},
   };
 
@@ -324,11 +367,16 @@
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     Object.assign(state.filters, saved.filters || {});
     Object.assign(state.sizes, saved.sizes || {});
+    if (saved.view === 'backtest') state.view = 'backtest';
+    if (saved.btTimeframe) state.btTimeframe = saved.btTimeframe;
   } catch (e) {}
+  // Link /dashboard#backtest mở thẳng tab báo cáo
+  if (location.hash === '#backtest') state.view = 'backtest';
+  else if (location.hash === '#live') state.view = 'live';
 
   function persist() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ filters: state.filters, sizes: state.sizes }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ filters: state.filters, sizes: state.sizes, view: state.view, btTimeframe: state.btTimeframe }));
     } catch (e) {}
   }
 
@@ -389,6 +437,8 @@
     return state.filters.unit === 'R' ? rec.r : rec.pnlPerUnit * rec.contractSize * sizeFor(rec.symbol);
   }
   const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+  const tfOf = (rec) => rec.timeframe || state.data.timeframe;
+  const tfSort = (a, b) => minutesOf(a) - minutesOf(b);
 
   function filtered() {
     const f = state.filters;
@@ -397,6 +447,7 @@
       Date.parse(r.candleTime) >= since &&
       (f.symbol === 'ALL' || r.symbol === f.symbol) &&
       (f.strategy === 'ALL' || r.strategy === f.strategy) &&
+      (f.timeframe === 'ALL' || tfOf(r) === f.timeframe) &&
       (f.sent === 'ALL' || (f.sent === 'SENT' ? r.sent : !r.sent)));
   }
 
@@ -443,6 +494,11 @@
       { value: 'ALL', label: 'Tất cả' },
       ...strategies.map((s) => ({ value: s, label: s })),
     ], f.strategy);
+    const timeframes = [...new Set([...(state.data.timeframes || []), ...state.data.records.map(tfOf)])].sort(tfSort);
+    f.timeframe = syncOptions($('#f-timeframe'), [
+      { value: 'ALL', label: 'Tất cả' },
+      ...timeframes.map((t) => ({ value: t, label: t })),
+    ], f.timeframe);
     for (const btn of document.querySelectorAll('#f-unit button')) {
       btn.setAttribute('aria-pressed', String(btn.dataset.unit === f.unit));
     }
@@ -475,7 +531,7 @@
   }
 
   function bindControls() {
-    for (const [id, key] of [['#f-range', 'range'], ['#f-symbol', 'symbol'], ['#f-strategy', 'strategy'], ['#f-sent', 'sent']]) {
+    for (const [id, key] of [['#f-range', 'range'], ['#f-symbol', 'symbol'], ['#f-strategy', 'strategy'], ['#f-timeframe', 'timeframe'], ['#f-sent', 'sent']]) {
       $(id).addEventListener('change', (e) => {
         state.filters[key] = e.target.value;
         persist();
@@ -489,6 +545,24 @@
         render();
       });
     }
+    for (const btn of document.querySelectorAll('.tabs button')) {
+      btn.addEventListener('click', () => {
+        state.view = btn.dataset.view;
+        persist();
+        try {
+          history.replaceState(null, '', `#${state.view}`);
+        } catch (e) {}
+        renderView();
+      });
+    }
+  }
+
+  function renderView() {
+    for (const btn of document.querySelectorAll('.tabs button')) {
+      btn.setAttribute('aria-selected', String(btn.dataset.view === state.view));
+    }
+    $('#view-live').hidden = state.view !== 'live';
+    $('#view-backtest').hidden = state.view !== 'backtest';
   }
 
   // ---------- Tổng quan ----------
@@ -780,7 +854,7 @@
     }
 
     const head = el('tr', {},
-      ...['Thời gian', 'Tài sản', 'Phương pháp', 'Lệnh'].map((h) => el('th', {}, h)),
+      ...['Thời gian', 'Tài sản', 'Phương pháp', 'Khung', 'Lệnh'].map((h) => el('th', {}, h)),
       ...['Điểm', 'Entry', 'SL', 'TP1'].map((h) => el('th', { class: 'num' }, h)),
       el('th', {}, 'Trạng thái'),
       el('th', { class: 'num' }, 'Kết quả'),
@@ -795,6 +869,7 @@
         el('td', {}, shortName(r.symbol)),
         el('td', {}, r.strategy,
           allies.length > 0 ? el('span', { class: 'tag', title: `Hợp lưu với: ${allies.join(', ')}` }, `+${allies.length} hợp lưu`) : null),
+        el('td', {}, tfOf(r)),
         el('td', {}, r.action === 'BUY' ? '▲ MUA' : '▼ BÁN'),
         el('td', { class: 'num' }, r.score ?? '—'),
         el('td', { class: 'num' }, fmtPrice(r.entry)),
@@ -817,7 +892,7 @@
     const list = filtered();
     renderSummary(list);
     renderEquity(list);
-    renderGroupTable('#by-strategy', list, (r) => r.strategy, (k) => k, 'Phương pháp', true);
+    renderGroupTable('#by-strategy', list, (r) => `${r.strategy}|${tfOf(r)}`, (k) => k.replace('|', ' · '), 'Phương pháp · khung', true);
     renderGroupTable('#by-asset', list, (r) => r.symbol, (k) => assetOf(k).displayName, 'Tài sản', false);
     renderSignals(list);
   }
@@ -827,12 +902,16 @@
     renderControls();
     renderContent();
     const d = state.data;
-    $('#updated').textContent = `Khung ${d.timeframe} · cập nhật lúc ${new Date(d.generatedAt).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })} · tự làm mới mỗi phút`;
-    const hours = (d.horizonBars * minutesOf(d.timeframe)) / 60;
+    const tfs = (d.timeframes && d.timeframes.length ? d.timeframes : [d.timeframe]).slice().sort(tfSort);
+    $('#updated').textContent = `Khung ${tfs.join(', ')} · cập nhật lúc ${new Date(d.generatedAt).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })} · tự làm mới mỗi phút`;
+    const horizonText = tfs.map((t) => {
+      const hours = (d.horizonBars * minutesOf(t)) / 60;
+      return `${t} ≈ ${hours >= 48 ? `${+(hours / 24).toFixed(1)} ngày` : `${+hours.toFixed(1)} giờ`}`;
+    }).join(', ');
     $('#footnote').textContent =
-      'Cách tính: mỗi tín hiệu được theo dõi từ nến kế tiếp sau nến phát tín hiệu. Chạm TP1 là thắng, chạm SL là thua; ' +
+      'Cách tính: mỗi tín hiệu được theo dõi bằng các nến cùng khung, từ nến kế tiếp sau nến phát tín hiệu. Chạm TP1 là thắng, chạm SL là thua; ' +
       'nếu cùng một nến chạm cả hai thì tính là thua. ' +
-      `Sau ${d.horizonBars} nến${hours ? ` (~${+hours.toFixed(1)} giờ)` : ''} chưa chạm thì chốt theo giá đóng cửa (Hết hạn). ` +
+      `Sau ${d.horizonBars} nến của khung tương ứng (${horizonText}) chưa chạm thì chốt theo giá đóng cửa (Hết hạn). ` +
       'Tỉ lệ thắng = TP1 / (TP1 + SL). Lãi/lỗ USD = chênh lệch giá × khối lượng (Vàng: 1 lot = 100 oz); ' +
       '1R = khoảng cách Entry → SL. Chưa trừ spread và phí giao dịch.';
   }
@@ -841,6 +920,149 @@
     const m = /^(\d+)([mhdw])$/i.exec(tf || '');
     if (!m) return 0;
     return Number(m[1]) * { m: 1, h: 60, d: 1440, w: 10080 }[m[2].toLowerCase()];
+  }
+
+  // ---------- Báo cáo backtest ----------
+  const fmtR = (v) => (v == null ? '—' : `${sign(v)}${abs2(v)}R`);
+  const fmtPct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+  const monthFmt = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', month: '2-digit', year: 'numeric' });
+  const fmtMonth = (iso) => monthFmt.format(new Date(iso));
+
+  // muted: kết quả ít lệnh, hiện màu trung tính và không vẽ thanh
+  function rBar(v, maxAbs, muted = false) {
+    const pct = !muted && maxAbs > 0 && v ? Math.min(50, (Math.abs(v) / maxAbs) * 50) : 0;
+    return el('div', { class: 'bar-cell' },
+      el('div', { class: 'track' },
+        pct > 0 ? el('div', { class: `bar ${v > 0 ? 'up' : 'down'}`, style: `width:calc(${pct.toFixed(2)}% - 1px)` }) : null),
+      el('span', { class: `bar-value ${muted ? 'muted' : signClass(v)}` }, fmtR(v)));
+  }
+
+  // Lý do chưa đạt chuẩn: tiêu chí đầu tiên không thỏa
+  function verdict(s, criteria) {
+    if (s.pass) return el('span', { class: 'status tp' }, el('i', { 'aria-hidden': 'true' }, '✓'), 'Đạt chuẩn');
+    if (s.trades < criteria.minTrades) return `Ít lệnh (< ${criteria.minTrades})`;
+    if (!(s.early.avgNet > 0 && s.late.avgNet > 0)) return 'Lỗ ở một giai đoạn';
+    if (s.p == null || s.p >= criteria.maxP) return `Không vượt ngẫu nhiên (p ≥ ${criteria.maxP})`;
+    return `PF < ${criteria.minProfitFactor}`;
+  }
+
+  function renderBacktest() {
+    const host = $('#bt-body');
+    const bt = state.backtest;
+    if (!bt) return;
+    const { report, job, active } = bt;
+    const isActive = (tf, key) => (active[tf] || []).includes(key);
+    const running = job && job.running ? ' · đang tạo báo cáo mới…' : '';
+
+    if (!report) {
+      $('#bt-note').textContent = `Chưa có báo cáo${running}`;
+      $('#bt-criteria').replaceChildren();
+      host.replaceChildren(el('section', { class: 'card' }, el('div', { class: 'empty' },
+        job && job.running
+          ? 'Bot đang tạo báo cáo lần đầu (mất vài phút), trang sẽ tự cập nhật.'
+          : 'Chưa có báo cáo. Bot tự tạo khi khởi động và định kỳ mỗi tuần, hoặc chạy "npm run backtest:report" trên server.')));
+      $('#bt-footnote').textContent = '';
+      return;
+    }
+
+    const c = report.criteria;
+    $('#bt-note').textContent = `Tạo lúc ${fmtTime(report.generatedAt)} (mất ${report.durationSec} giây) · dữ liệu Vàng thật từ TradingView${running}`;
+    $('#bt-criteria').replaceChildren(
+      el('p', { class: 'note' }, 'Một phương pháp "đạt chuẩn" khi thỏa cả 4 tiêu chí (đặt trước khi xem kết quả):'),
+      el('ol', { class: 'criteria' },
+        el('li', {}, `Lãi ròng (đã trừ chi phí) ở cả giai đoạn đầu (${Math.round(c.splitRatio * 100)}% thời gian) và giai đoạn sau`),
+        el('li', {}, `Vượt lệnh vào ngẫu nhiên cùng chiều xu hướng: xác suất do may mắn p < ${c.maxP}`),
+        el('li', {}, `Có ít nhất ${c.minTrades} lệnh`),
+        el('li', {}, `Profit factor (tổng lãi / tổng lỗ) ≥ ${c.minProfitFactor}`)));
+
+    const blocks = [];
+    for (const symbol of [...new Set(report.results.map((r) => r.symbol))]) {
+      const results = report.results.filter((r) => r.symbol === symbol && !r.error).sort((a, b) => tfSort(a.timeframe, b.timeframe));
+      const errors = report.results.filter((r) => r.symbol === symbol && r.error);
+      const name = (results[0] && results[0].displayName) || symbol;
+      if (results.length === 0) {
+        blocks.push(el('section', { class: 'card' }, el('h2', {}, name), el('div', { class: 'empty' }, errors.map((e) => `${e.timeframe}: ${e.error}`).join(' · '))));
+        continue;
+      }
+
+      // Ma trận phương pháp × khung
+      const tfs = results.map((r) => r.timeframe);
+      const keys = results[0].strategies.map((s) => ({ key: s.key, name: s.name }));
+      const matrixHead = el('tr', {}, el('th', {}, 'Phương pháp'), ...tfs.map((t) => el('th', {}, t)));
+      const matrixRows = keys.map(({ key, name: label }) => el('tr', {},
+        el('td', { class: 'name-cell' }, label),
+        ...results.map((res) => {
+          const s = res.strategies.find((x) => x.key === key);
+          if (!s) return el('td', {}, '—');
+          const on = isActive(res.timeframe, key);
+          // Ít lệnh thì kết quả chưa có ý nghĩa thống kê: hiện màu trung tính để không gây hiểu nhầm
+          const enough = s.trades >= c.minTrades;
+          return el('td', {},
+            el('div', { class: `mx-value ${enough ? signClass(s.avgNet) : 'muted'}` }, s.trades ? fmtR(s.avgNet) : '—'),
+            el('div', { class: 'mx-meta' }, s.trades ? `thắng ${fmtPct(s.winRate)} · ${s.trades} lệnh${enough ? '' : ' (ít lệnh)'}` : 'không có lệnh'),
+            s.pass || on ? el('div', { class: 'mx-badges' },
+              s.pass ? el('span', { class: 'status tp' }, el('i', { 'aria-hidden': 'true' }, '✓'), 'Đạt chuẩn') : null,
+              on ? el('span', { class: 'pill' }, 'Đang bật') : null) : null);
+        })));
+      blocks.push(el('section', { class: 'card' },
+        el('div', { class: 'card-head' }, el('div', {},
+          el('h2', {}, `${name}: phương pháp × khung thời gian`),
+          el('p', { class: 'note' }, `R/lệnh sau chi phí, tỉ lệ thắng và số lệnh khi chạy riêng từng phương pháp; ô màu xám: dưới ${c.minTrades} lệnh, chưa đủ để kết luận`))),
+        el('div', { class: 'table-wrap' }, el('table', { class: 'matrix' }, el('thead', {}, matrixHead), el('tbody', {}, matrixRows))),
+        errors.length ? el('p', { class: 'note' }, `Lỗi: ${errors.map((e) => `${e.timeframe}: ${e.error}`).join(' · ')}`) : null));
+
+      // Chi tiết theo khung
+      if (!tfs.includes(state.btTimeframe)) {
+        state.btTimeframe = (results.find((r) => r.strategies.some((s) => s.pass)) || {}).timeframe
+          || tfs.find((t) => (active[t] || []).length) || tfs[tfs.length - 1];
+      }
+      const res = results.find((r) => r.timeframe === state.btTimeframe);
+      const picker = el('div', { class: 'segmented', role: 'group', 'aria-label': 'Chọn khung' },
+        ...tfs.map((t) => {
+          const b = el('button', { type: 'button', 'aria-pressed': String(t === res.timeframe) }, t);
+          b.addEventListener('click', () => { state.btTimeframe = t; persist(); renderBacktest(); });
+          return b;
+        }));
+      const enough = (s) => s.trades >= c.minTrades;
+      const rows = [...res.strategies].sort((a, b) => (b.pass - a.pass) || (enough(b) - enough(a)) || (b.avgNet - a.avgNet));
+      // Thang đo thanh chỉ tính các kết quả đủ lệnh để một lệnh may mắn không làm các thanh khác bé lại
+      const maxAbs = Math.max(0.0001, ...[...rows, ...(res.combined ? [res.combined] : [])].filter(enough).map((s) => Math.abs(s.avgNet || 0)));
+      const head = el('tr', {},
+        el('th', {}, 'Phương pháp'), el('th', {}, 'Trạng thái'),
+        ...['Lệnh', 'Thắng', 'R/lệnh', 'PF', 'Sụt max', 'Đầu / sau', 'Ngẫu nhiên / p', 'MUA / BÁN'].map((h) => el('th', { class: 'num' }, h)),
+        el('th', {}, 'Kết luận'));
+      const line = (label, s, on) => el('tr', {},
+        el('td', { class: 'name-cell' }, label),
+        el('td', {}, on ? el('span', { class: 'pill' }, 'Đang bật') : el('span', { class: 'muted' }, 'Tắt')),
+        el('td', { class: 'num' }, s.trades),
+        el('td', { class: 'num' }, fmtPct(s.winRate)),
+        el('td', { class: 'num' }, rBar(s.avgNet, maxAbs, !enough(s))),
+        el('td', { class: 'num' }, s.profitFactor ?? '—'),
+        el('td', { class: 'num' }, s.maxDrawdown != null ? `${abs2(s.maxDrawdown, 1)}R` : '—'),
+        el('td', { class: 'num' },
+          el('span', { class: signClass(s.early.avgNet) }, s.early.trades ? fmtR(s.early.avgNet) : '—'), ' / ',
+          el('span', { class: signClass(s.late.avgNet) }, s.late.trades ? fmtR(s.late.avgNet) : '—')),
+        el('td', { class: 'num' }, `${fmtR(s.randomAvgNet)} / ${s.p ?? '—'}`),
+        el('td', { class: 'num' },
+          el('span', { class: signClass(s.buy.avgNet) }, s.buy.trades ? fmtR(s.buy.avgNet) : '—'), ' / ',
+          el('span', { class: signClass(s.sell.avgNet) }, s.sell.trades ? fmtR(s.sell.avgNet) : '—')),
+        el('td', {}, verdict(s, c)));
+      const body = rows.map((s) => line(s.name, s, isActive(res.timeframe, s.key)));
+      if (res.combined) body.push(line(`Gộp các phương pháp đang bật (${res.combined.keys.length})`, res.combined, true));
+      blocks.push(el('section', { class: 'card' },
+        el('div', { class: 'card-head' },
+          el('div', {}, el('h2', {}, `Chi tiết khung ${res.timeframe}`),
+            el('p', { class: 'note' }, `Dữ liệu ${fmtMonth(res.from)} → ${fmtMonth(res.to)} · ${res.bars.toLocaleString('vi-VN')} nến · giai đoạn sau từ ${fmtMonth(res.splitAt)} · ${res.cost}`)),
+          picker),
+        el('div', { class: 'table-wrap' }, el('table', {}, el('thead', {}, head), el('tbody', {}, body)))));
+    }
+    host.replaceChildren(...blocks);
+    $('#bt-footnote').textContent =
+      `Cách tính: mỗi nến được phân tích bằng đúng ${report.candleWindow} nến trước đó như khi bot chạy thật. Vào lệnh ở giá đóng cửa nến tín hiệu; ` +
+      `chạm TP1 là thắng, chạm SL là thua (cùng nến chạm cả hai tính thua), sau ${report.horizonBars} nến chưa chạm thì chốt theo giá đóng cửa; ` +
+      `cooldown ${report.cooldownBars} nến cùng chiều; đã trừ chi phí. Chưa gồm bộ lọc AI và chặn tin tức. ` +
+      '"Ngẫu nhiên": 200 lần vào lệnh ở nến ngẫu nhiên theo chiều EMA200 (SL 1,5 ATR, TP 2R, cùng số lệnh); ' +
+      'p = tỉ lệ lần ngẫu nhiên đạt kết quả bằng hoặc tốt hơn. Đầu / sau: R/lệnh ở giai đoạn đầu và giai đoạn sau. Kết quả quá khứ không đảm bảo tương lai.';
   }
 
   // ---------- Lịch tin tức ----------
@@ -923,7 +1145,7 @@
 
   async function load() {
     document.body.classList.add('loading');
-    const [signals, news] = await Promise.allSettled([fetchJson(API_URL), fetchJson(NEWS_URL)]);
+    const [signals, news, backtest] = await Promise.allSettled([fetchJson(API_URL), fetchJson(NEWS_URL), fetchJson(BACKTEST_URL)]);
     if (signals.status === 'fulfilled') {
       state.data = signals.value;
       $('#error').hidden = true;
@@ -936,6 +1158,10 @@
     }
     if (news.status === 'fulfilled') state.news = news.value;
     renderNews();
+    if (backtest.status === 'fulfilled') {
+      state.backtest = backtest.value;
+      renderBacktest();
+    }
     document.body.classList.remove('loading');
   }
 
@@ -946,6 +1172,7 @@
   });
 
   bindControls();
+  renderView();
   load();
   setInterval(load, REFRESH_MS);
 })();

@@ -1,22 +1,37 @@
 const CONFIG = require('./config');
 const { fetchCandles, getClosedCandles, timeframeToMs } = require('./services/marketData');
-const { evaluateAllStrategies, strategies } = require('./strategies');
+const { evaluateAllStrategies, strategies, getStrategyPlan } = require('./strategies');
 const { getMinScore, SignalCooldown } = require('./signalFilter');
 const { validateTradeSignal, generateMarketDigest } = require('./ai/geminiAnalyzer');
 const { sendTradeAlert, sendMarketDigest } = require('./services/telegram');
 const signalTracker = require('./services/signalTracker');
 const { getNewsBlackout, describeEvent } = require('./services/newsCalendar');
 
-// Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản
+// Kế hoạch chạy: khung thời gian -> các chiến lược (cấu hình STRATEGIES)
+const strategyPlan = getStrategyPlan();
+
+// Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản + khung thời gian
 const lastAnalyzedCandle = new Map();
-const signalCooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
-// Cooldown riêng cho việc ghi nhận tín hiệu bị AI từ chối, để một setup kéo dài không bị ghi lặp ở mọi nến
-const rejectedCooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
+
+// Cooldown theo khung thời gian: tín hiệu đã gửi, và riêng cho việc ghi nhận tín hiệu bị AI từ chối
+// (để một setup kéo dài không bị ghi lặp ở mọi nến)
+const cooldowns = new Map();
+function cooldownsFor(timeframe) {
+  if (!cooldowns.has(timeframe)) {
+    const windowMs = timeframeToMs(timeframe);
+    cooldowns.set(timeframe, {
+      sent: new SignalCooldown(CONFIG.signalCooldownBars, windowMs),
+      rejected: new SignalCooldown(CONFIG.signalCooldownBars, windowMs),
+    });
+  }
+  return cooldowns.get(timeframe);
+}
 
 // Khôi phục cooldown từ các tín hiệu đã lưu để khởi động lại bot không phát lại tín hiệu của nến cũ
 try {
   for (const rec of signalTracker.listSignals()) {
-    (rec.sent ? signalCooldown : rejectedCooldown).record(rec.symbol, rec.action, Date.parse(rec.candleTime));
+    const cd = cooldownsFor(rec.timeframe || CONFIG.timeframe);
+    (rec.sent ? cd.sent : cd.rejected).record(rec.symbol, rec.action, Date.parse(rec.candleTime));
   }
 } catch (err) {
   console.error('❌ [SignalTracker] Không khôi phục được cooldown từ dữ liệu đã lưu:', err.message);
@@ -50,7 +65,7 @@ function renderScoreBar(score) {
  * Trích xuất snapshot thị trường để phục vụ thẩm định và báo cáo
  * Dùng lại bộ chỉ báo đã tính cho các chiến lược (cache theo marketData) để AI thấy đúng số liệu chiến lược đã dùng
  */
-function createMarketSnapshot(marketData) {
+function createMarketSnapshot(marketData, timeframe = CONFIG.timeframe) {
   const { highs, lows, candles } = marketData;
   const ind = strategies[0].calculateIndicators(marketData);
 
@@ -61,7 +76,7 @@ function createMarketSnapshot(marketData) {
   return {
     symbol: marketData.symbol || CONFIG.symbol,
     displayName: marketData.displayName || marketData.symbol || CONFIG.symbol,
-    timeframe: CONFIG.timeframe,
+    timeframe,
     currentPrice: ind.currentPrice,
     ema20: ind.ema20,
     ema50: ind.ema50,
@@ -88,24 +103,36 @@ function createMarketSnapshot(marketData) {
 }
 
 /**
- * Quét một tài sản đơn lẻ (Ví dụ: XAU/USD, ETH/USDT, BTC/USDT)
+ * Quét một tài sản trên một khung thời gian với các chiến lược được cấu hình cho khung đó
+ * @param {string} symbol - Ví dụ: XAU/USD, ETH/USDT
+ * @param {string} [timeframe] - Khung nến, mặc định TIMEFRAME
+ * @param {Array<object>} [strategyList] - Chiến lược chạy trên khung này, mặc định theo cấu hình STRATEGIES
  */
-async function scanSingleSymbol(symbol) {
-  const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-  console.log(`\n[${timestamp}] 🔍 Đang quét thị trường: ${symbol} (${CONFIG.timeframe})...`);
+async function scanSingleSymbol(symbol, timeframe = CONFIG.timeframe, strategyList = strategyPlan.get(timeframe) || []) {
+  if (strategyList.length === 0) return;
+  const stateKey = `${symbol}|${timeframe}`;
+  const timeframeMs = timeframeToMs(timeframe);
 
-  const rawData = await fetchCandles(symbol, CONFIG.timeframe, 14);
+  // Nến kế tiếp của khung này chưa thể đóng thì không cần tải lại dữ liệu (vd: khung 4h không tải mỗi 5 phút)
+  const lastAnalyzed = lastAnalyzedCandle.get(stateKey);
+  if (lastAnalyzed != null && Date.now() < lastAnalyzed + 2 * timeframeMs) return;
+
+  const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  console.log(`\n[${timestamp}] 🔍 Đang quét thị trường: ${symbol} (${timeframe})...`);
+
+  const rawData = await fetchCandles(symbol, timeframe, 14);
   // Chỉ phân tích nến đã đóng để tín hiệu không bị vẽ lại (repaint) khi nến đang chạy thay đổi
-  const marketData = rawData && getClosedCandles(rawData, CONFIG.timeframe);
+  const marketData = rawData && getClosedCandles(rawData, timeframe);
   if (!marketData || marketData.closes.length < 50) {
-    console.log(`⚠️ [${symbol}] Chưa gom đủ dữ liệu nến.`);
+    console.log(`⚠️ [${symbol} ${timeframe}] Chưa gom đủ dữ liệu nến.`);
     return;
   }
 
-  // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó theo các nến mới đóng
+  // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó trên khung này theo các nến mới đóng
   runSafely('SignalTracker', () => signalTracker.updateOpenSignals(symbol, marketData.candles, {
     source: marketData.source,
     isFallback: marketData.isFallback,
+    timeframe,
   }));
 
   // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
@@ -113,21 +140,20 @@ async function scanSingleSymbol(symbol) {
   const candleTime = new Date(lastClosed.date).getTime();
   const candleLabel = new Date(candleTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
   // So sánh <= để một nguồn dự phòng trả dữ liệu trễ không làm phân tích lại nến cũ
-  const lastAnalyzed = lastAnalyzedCandle.get(symbol);
   if (lastAnalyzed != null && candleTime <= lastAnalyzed) {
-    console.log(`ℹ️ [${symbol}] Nến ${candleLabel} đã được phân tích, chờ nến mới đóng.`);
+    console.log(`ℹ️ [${symbol} ${timeframe}] Nến ${candleLabel} đã được phân tích, chờ nến mới đóng.`);
     return;
   }
   // Nến đã đóng quá một khung thời gian (thị trường đóng cửa cuối tuần, dữ liệu trễ, bot vừa khởi động lại):
   // không phát tín hiệu theo giá cũ
-  const timeframeMs = timeframeToMs(CONFIG.timeframe);
   if (Date.now() - (candleTime + timeframeMs) > timeframeMs) {
-    console.log(`ℹ️ [${symbol}] Nến gần nhất (${candleLabel}) đã đóng quá lâu (thị trường đóng cửa hoặc dữ liệu trễ), bỏ qua.`);
+    console.log(`ℹ️ [${symbol} ${timeframe}] Nến gần nhất (${candleLabel}) đã đóng quá lâu (thị trường đóng cửa hoặc dữ liệu trễ), bỏ qua.`);
     return;
   }
-  lastAnalyzedCandle.set(symbol, candleTime);
+  lastAnalyzedCandle.set(stateKey, candleTime);
+  const { sent: signalCooldown, rejected: rejectedCooldown } = cooldownsFor(timeframe);
 
-  const snapshot = createMarketSnapshot(marketData);
+  const snapshot = createMarketSnapshot(marketData, timeframe);
   const prevPrice = marketData.closes[marketData.closes.length - 2];
   const diff = snapshot.currentPrice - prevPrice;
   const changeText = diff >= 0 ? `+${diff.toFixed(2)}` : `${diff.toFixed(2)}`;
@@ -137,13 +163,13 @@ async function scanSingleSymbol(symbol) {
   const vwapText = snapshot.vwap ? ` | VWAP: $${snapshot.vwap.toFixed(1)}` : '';
   const deltaText = snapshot.delta !== 0 ? ` | Delta: ${snapshot.delta > 0 ? '+' : ''}${snapshot.delta.toFixed(1)}` : '';
 
-  console.log(`💵 [${snapshot.displayName}]: $${snapshot.currentPrice.toFixed(2)} (${changeText}) | EMA20: ${snapshot.ema20?.toFixed(2) || 'N/A'} | RSI: ${snapshot.rsi?.toFixed(1) || 'N/A'}${adxText}${stochText}${vwapText}${deltaText} | ATR: ${snapshot.atr?.toFixed(2) || 'N/A'}`);
+  console.log(`💵 [${snapshot.displayName} ${timeframe}]: $${snapshot.currentPrice.toFixed(2)} (${changeText}) | EMA20: ${snapshot.ema20?.toFixed(2) || 'N/A'} | RSI: ${snapshot.rsi?.toFixed(1) || 'N/A'}${adxText}${stochText}${vwapText}${deltaText} | ATR: ${snapshot.atr?.toFixed(2) || 'N/A'}`);
 
-  // 1. Chạy tất cả các chiến lược kỹ thuật
-  const candidateSignals = evaluateAllStrategies(marketData);
+  // 1. Chạy các chiến lược được cấu hình cho khung thời gian này
+  const candidateSignals = evaluateAllStrategies(marketData, { strategies: strategyList });
 
   if (candidateSignals.length === 0) {
-    console.log(`ℹ️ [Trạng thái - ${snapshot.displayName}]: Đã quét ${strategies.length} chiến lược -> Chưa có tín hiệu vào lệnh.`);
+    console.log(`ℹ️ [Trạng thái - ${snapshot.displayName} ${timeframe}]: Đã quét ${strategyList.length} chiến lược -> Chưa có tín hiệu vào lệnh.`);
     return;
   }
 
@@ -161,6 +187,7 @@ async function scanSingleSymbol(symbol) {
   for (const signal of candidateSignals) {
     signal.symbol = symbol;
     signal.displayName = snapshot.displayName;
+    signal.timeframe = timeframe;
 
     const scoreDisplay = signal.score != null ? ` | Confluence: ${renderScoreBar(signal.score)}` : '';
     const gradeBadge = signal.rankBadge || signal.grade || signal.rank || '';
@@ -180,7 +207,7 @@ async function scanSingleSymbol(symbol) {
     }
 
     if (signalCooldown.isCoolingDown(symbol, signal.action, candleTime)) {
-      console.log(`⏳ Bỏ qua: đã phát tín hiệu ${signal.action} cho ${snapshot.displayName} trong ${CONFIG.signalCooldownBars} nến gần đây.`);
+      console.log(`⏳ Bỏ qua: đã phát tín hiệu ${signal.action} cho ${snapshot.displayName} (${timeframe}) trong ${CONFIG.signalCooldownBars} nến gần đây.`);
       continue;
     }
 
@@ -216,15 +243,17 @@ async function scanSingleSymbol(symbol) {
 }
 
 /**
- * Quét toàn bộ danh mục tài sản đã cấu hình
+ * Quét toàn bộ danh mục tài sản đã cấu hình, trên mọi khung thời gian có chiến lược
  */
 async function scanMarket(targetSymbol = null) {
   const symbolsToScan = targetSymbol ? [targetSymbol] : (CONFIG.symbols || [CONFIG.symbol]);
   for (const sym of symbolsToScan) {
-    try {
-      await scanSingleSymbol(sym);
-    } catch (err) {
-      console.error(`❌ [ScanMarket] Lỗi khi quét ${sym}:`, err.message);
+    for (const [timeframe, strategyList] of strategyPlan) {
+      try {
+        await scanSingleSymbol(sym, timeframe, strategyList);
+      } catch (err) {
+        console.error(`❌ [ScanMarket] Lỗi khi quét ${sym} (${timeframe}):`, err.message);
+      }
     }
   }
 }
@@ -241,7 +270,7 @@ async function runMarketBriefing(targetSymbol = null) {
       const marketData = rawData && getClosedCandles(rawData, CONFIG.timeframe);
       if (!marketData || marketData.closes.length < 50) continue;
 
-      const snapshot = createMarketSnapshot(marketData);
+      const snapshot = createMarketSnapshot(marketData, CONFIG.timeframe);
       const digest = await generateMarketDigest(snapshot);
 
       if (digest) {
@@ -257,6 +286,7 @@ async function runMarketBriefing(targetSymbol = null) {
 }
 
 module.exports = {
+  strategyPlan,
   scanMarket,
   scanSingleSymbol,
   runMarketBriefing,

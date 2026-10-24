@@ -95,7 +95,7 @@ async function sendTradeAlert(signal) {
   let msg = `${headerIcon} *TÍN HIỆU GIAO DỊCH (${assetName})* ${headerIcon}\n\n`;
   msg += `📌 *Chiến Lược:* \`${signal.strategy}\`\n`;
   msg += `👉 *Hành Động:* *${icon}*\n`;
-  msg += `⏱ *Khung Giờ:* \`${CONFIG.timeframe}\`\n`;
+  msg += `⏱ *Khung Giờ:* \`${signal.timeframe || CONFIG.timeframe}\`\n`;
 
   if (signal.score != null) {
     msg += `🏆 *Đánh Giá:* \`${signal.score}/100\` — *${signal.rankBadge || signal.grade || signal.rank}*\n`;
@@ -147,6 +147,9 @@ async function sendTradeAlert(signal) {
   }
   if (signal.indicators.candlePattern || signal.indicators.pattern) {
     msg += `• Nến xác nhận: \`${signal.indicators.candlePattern || signal.indicators.pattern}\`\n`;
+  }
+  if (signal.indicators.donchianHigh != null && signal.indicators.donchianLow != null) {
+    msg += `• Kênh Donchian: \`$${signal.indicators.donchianLow.toFixed(2)} - $${signal.indicators.donchianHigh.toFixed(2)}\`\n`;
   }
   if (signal.indicators.fvgZone) {
     msg += `• Vùng FVG: \`${signal.indicators.fvgZone}\`\n`;

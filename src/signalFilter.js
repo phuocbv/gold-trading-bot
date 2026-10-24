@@ -1,9 +1,11 @@
 const CONFIG = require('./config');
 
 /**
- * Ngưỡng điểm tối thiểu theo loại tín hiệu (Order Flow có thang điểm riêng)
+ * Ngưỡng điểm tối thiểu theo loại tín hiệu: chiến lược tự khai báo ngưỡng riêng (minScore) thì dùng ngưỡng đó,
+ * Order Flow có thang điểm riêng
  */
 function getMinScore(signal) {
+  if (signal.minScore != null) return signal.minScore;
   return signal.strategy.includes('Order Flow')
     ? CONFIG.minConfluenceScore
     : CONFIG.minStrategyScore;

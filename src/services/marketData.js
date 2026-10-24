@@ -248,6 +248,54 @@ async function fetchTradingViewCandles(symbol = 'OANDA:XAUUSD', interval = '15m'
 }
 
 /**
+ * Tải lịch sử nến dài từ TradingView cho backtest: tải lần đầu rồi gọi fetchMore để lấy thêm nến cũ hơn
+ * tới khi đủ số nến hoặc TradingView không trả thêm (tài khoản ẩn danh giới hạn khoảng 5.000 nến 15m)
+ * @returns {Promise<Array<object>>} Nến cũ nhất -> mới nhất: { date, open, high, low, close, volume }
+ */
+async function fetchTradingViewHistory(symbol = 'OANDA:XAUUSD', interval = '15m', bars = 5000) {
+  const tvSymbol = resolveTradingViewSymbol(symbol);
+  const client = new TradingView.Client();
+  const chart = new client.Session.Chart();
+  chart.setMarket(tvSymbol, { timeframe: mapTradingViewTimeframe(interval), range: Math.min(bars, 5000) });
+
+  try {
+    await new Promise((resolve, reject) => {
+      let last = -1;
+      let stable = 0;
+      let waited = 0;
+      chart.onError((...err) => reject(new Error(`Lỗi TradingView Chart: ${err.join(' ')}`)));
+      const tick = setInterval(() => {
+        const count = chart.periods.length;
+        stable = count === last ? stable + 1 : 0;
+        last = count;
+        waited += 1;
+        if (count >= bars || (count > 0 && stable >= 4) || waited > 120) {
+          clearInterval(tick);
+          if (count === 0) reject(new Error(`TradingView không trả dữ liệu cho ${tvSymbol} (${interval})`));
+          else resolve();
+          return;
+        }
+        if (count > 0 && stable === 0) chart.fetchMore(5000);
+      }, 1500);
+    });
+  } finally {
+    try {
+      client.end();
+    } catch (e) {}
+  }
+
+  const offset = CONFIG.priceOffset || 0;
+  return [...chart.periods].reverse().slice(-bars).map((p) => ({
+    date: new Date(p.time * 1000),
+    open: p.open + offset,
+    high: p.max + offset,
+    low: p.min + offset,
+    close: p.close + offset,
+    volume: p.volume || 0,
+  }));
+}
+
+/**
  * Lấy dữ liệu nến thời gian thực từ Binance Spot kèm dữ liệu Order Flow Delta (Taker Buy vs Sell)
  * @param {string} binanceSymbol - Ví dụ: 'PAXGUSDT', 'ETHUSDT', 'BTCUSDT'
  * @param {string} interval - '15m', '1h', '4h', '1d'
@@ -579,6 +627,7 @@ module.exports = {
   fetchCandles,
   fetchMultiTimeframeCandles,
   fetchTradingViewCandles,
+  fetchTradingViewHistory,
   fetchBinanceKlines,
   fetchBinanceSpotGold,
   fetchYahooCandles,
