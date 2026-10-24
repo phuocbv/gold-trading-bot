@@ -4,8 +4,7 @@ const BaseStrategy = require('./baseStrategy');
  * Phá vỡ kênh Donchian 55 nến (hệ thống Turtle 2) thuận xu hướng EMA200.
  * Backtest Vàng (npm run backtest:report, trừ spread $0.35, 10/2026):
  * - Khung 4h (08/2023 - 10/2026): 215 lệnh, thắng 45%, +0.33R/lệnh, PF 1.60, p = 0.04
- * - Khung 1h (03/2025 - 10/2026): 382 lệnh, thắng 41%, +0.21R/lệnh, PF 1.35, p = 0.03 (sát ngưỡng),
- *   nhưng lỗ từ 06/2026 (-0.12R/lệnh) nên mặc định chưa bật
+ * - Khung 1h (03/2025 - 10/2026): 382 lệnh, thắng 41%, +0.21R/lệnh, PF 1.35, p = 0.03 (sát ngưỡng, yếu từ 06/2026)
  * - Khung 15m và 30m: không có lợi thế (≤ +0.05R/lệnh), nên không chạy ở các khung này.
  */
 class DonchianBreakoutStrategy extends BaseStrategy {

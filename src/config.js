@@ -27,12 +27,11 @@ const timeframe = process.env.TIMEFRAME || '15m';
 
 // Phương pháp và khung thời gian chạy: "tên@khung" cách nhau bởi dấu phẩy; thiếu "@khung" thì dùng TIMEFRAME.
 // Theo backtest Vàng (2 năm gần nhất và 40 năm khung ngày, đã trừ spread):
-// - Donchian 55 lãi cả hai năm ở mọi khung từ 30m tới 1D, tốt nhất ở 2h (+0.38R/lệnh), 4h (+0.34R) và 1D
+// - Donchian 55 lãi cả hai năm ở mọi khung từ 30m tới 1D, đạt chuẩn ở 1h (+0.21R/lệnh), 2h (+0.38R), 4h (+0.34R) và 1D
 // - Supertrend(10,3) chỉ có lợi thế ở khung ngày (lãi ở cả 5 giai đoạn thị trường 1990-2026)
 // - Order Flow lỗ ở gần như mọi khung nên mặc định tắt (vẫn bật lại được bằng "order-flow")
-// Donchian 1h đạt chuẩn sát ngưỡng và đang lỗ vài tháng gần nhất nên chưa bật (thêm "donchian-55@1h" nếu muốn).
 const DEFAULT_STRATEGIES = 'trend-following,mean-reversion,volatility-breakout,smc-lite,rsi-divergence,smart-money-flow,'
-  + 'donchian-55@2h,donchian-55@4h,donchian-55@1d,supertrend@1d';
+  + 'donchian-55@1h,donchian-55@2h,donchian-55@4h,donchian-55@1d,supertrend@1d';
 function parseStrategyPlan(raw) {
   return parseList(raw).map((entry) => {
     const [key, tf] = entry.split('@');
