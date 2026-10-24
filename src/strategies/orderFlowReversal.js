@@ -1,4 +1,5 @@
 const BaseStrategy = require('./baseStrategy');
+const CONFIG = require('../config');
 
 class OrderFlowReversalStrategy extends BaseStrategy {
   constructor() {
@@ -211,8 +212,8 @@ class OrderFlowReversalStrategy extends BaseStrategy {
       bottomFactors.push(`Trend mạnh, đánh ngược dòng rủi ro (ADX ${adx.toFixed(1)}) [-15đ]`);
     }
 
-    // Ngưỡng điểm kích hoạt tối thiểu
-    const minScore = 65;
+    // Ngưỡng điểm kích hoạt tối thiểu (MIN_CONFLUENCE_SCORE, mặc định 65)
+    const minScore = CONFIG.minConfluenceScore;
 
     // ==========================================
     // 3. TẠO TÍN HIỆU GIAO DỊCH

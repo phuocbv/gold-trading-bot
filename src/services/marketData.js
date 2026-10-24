@@ -267,17 +267,6 @@ async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', 
         throw new Error('Dữ liệu nến rỗng từ Binance');
       }
 
-      // 2. Lấy giá tick trực tiếp realtime mới nhất
-      let livePrice = null;
-      try {
-        const tickerRes = await axios.get(`${endpoint}/api/v3/ticker/price?symbol=${binanceSymbol}`, { timeout: 3000 });
-        if (tickerRes.data && tickerRes.data.price) {
-          livePrice = parseFloat(tickerRes.data.price);
-        }
-      } catch (tickerErr) {
-        // Dùng giá đóng cửa nến cuối nếu lỗi ticker
-      }
-
       const closes = [];
       const highs = [];
       const lows = [];
@@ -288,23 +277,16 @@ async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', 
       const deltas = [];
       const candles = [];
 
-      rawKlines.forEach((k, index) => {
+      rawKlines.forEach((k) => {
         const open = parseFloat(k[1]);
-        let high = parseFloat(k[2]);
-        let low = parseFloat(k[3]);
-        let close = parseFloat(k[4]);
+        const high = parseFloat(k[2]);
+        const low = parseFloat(k[3]);
+        const close = parseFloat(k[4]);
         const volume = parseFloat(k[5]);
         const buyVolume = parseFloat(k[9] || 0); // Taker buy base volume
         const sellVolume = Math.max(0, volume - buyVolume);
         const delta = buyVolume - sellVolume; // Order Flow Delta
         const date = new Date(k[0]);
-
-        // Cập nhật nến hiện tại với giá realtime tick mới nhất
-        if (index === rawKlines.length - 1 && livePrice != null) {
-          close = livePrice;
-          if (livePrice > high) high = livePrice;
-          if (livePrice < low) low = livePrice;
-        }
 
         closes.push(close);
         highs.push(high);
@@ -479,11 +461,11 @@ async function fetchYahooCandles(symbol = 'GC=F', interval = '15m', daysBack = 1
 
 /**
  * Hàm lấy nến tổng quát với thứ tự ưu tiên cấu hình & cơ chế Fallback tự động
- * 1. TradingView (OANDA:XAUUSD hoặc BINANCE:ETHUSDT)
+ * 1. TradingView (OANDA:XAUUSD hoặc BINANCE:ETHUSDT) - nếu MARKET_DATA_SOURCE=TRADINGVIEW
  * 2. Binance Spot (PAXGUSDT hoặc ETHUSDT) - Có Order Flow Delta thật
- * 3. Yahoo Finance
- * Hàm lấy nến tổng quát đa nguồn hỗ trợ tự động Fallback (Binance -> Gate.io -> Yahoo)
- * @param {string} symbol - 'XAU/USD' | 'XAUUSD' | 'PAXGUSDT' (mặc định Spot Realtime) hoặc 'GC=F' (Futures)
+ * 3. Yahoo Finance - chỉ cho Crypto (Vàng trên Yahoo là hợp đồng tương lai GC=F, lệch giá giao ngay)
+ * data.isFallback = true khi dữ liệu đến từ nguồn dự phòng thay cho nguồn chính đã cấu hình
+ * @param {string} symbol - 'XAU/USD' | 'XAUUSD' | 'ETH/USDT' | 'BTC/USDT' ...
  * @param {string} interval - '15m', '1h', v.v.
  * @param {number} daysBack - Số ngày lùi lại nếu dùng Yahoo
  */
@@ -507,6 +489,7 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
       data.symbol = resolved.rawSymbol;
       data.displayName = resolved.displayName;
       data.isCrypto = resolved.isCrypto;
+      data.isFallback = false;
       cache.set(cacheKey, { timestamp: now, data });
       return data;
     } catch (tvError) {
@@ -520,33 +503,31 @@ async function fetchCandles(symbol = 'XAU/USD', interval = '15m', daysBack = 14)
     data.symbol = resolved.rawSymbol;
     data.displayName = resolved.displayName;
     data.isCrypto = resolved.isCrypto;
+    data.isFallback = sourcePreference === 'TRADINGVIEW';
     cache.set(cacheKey, { timestamp: now, data });
     return data;
   } catch (binanceError) {
-    console.warn(`⚠️ [MarketData] Binance Spot gặp sự cố (${binanceError.message}). Đang chuyển sang Yahoo Finance...`);
+    console.warn(`⚠️ [MarketData] Binance Spot gặp sự cố (${binanceError.message}).`);
   }
 
-  // Chiến lược 3: Yahoo Finance Fallback
+  // Vàng không dùng Yahoo: GC=F là hợp đồng tương lai, cao hơn giá giao ngay ~$12-19,
+  // tín hiệu tính theo giá đó sẽ lệch Entry/SL/TP. Bỏ qua lượt quét an toàn hơn.
+  if (!resolved.isCrypto) {
+    console.error(`❌ [MarketData] Không có nguồn giá giao ngay cho ${symbol} (TradingView và Binance đều lỗi), bỏ qua lượt này.`);
+    return null;
+  }
+
+  // Chiến lược 3: Yahoo Finance (giá crypto giao ngay, dữ liệu trễ vài phút)
   try {
     const data = await fetchYahooCandles(resolved.yahooSymbol, interval, daysBack);
     data.symbol = resolved.rawSymbol;
     data.displayName = resolved.displayName;
     data.isCrypto = resolved.isCrypto;
+    data.isFallback = true;
     cache.set(cacheKey, { timestamp: now, data });
     return data;
   } catch (fbErr) {
     console.error(`❌ [MarketData] Toàn bộ nguồn cấp nến cho ${symbol} đều thất bại.`);
-    return null;
-  }
-
-  // 3. Fallback sang Yahoo Finance (GC=F)
-  try {
-    const yahooSymbol = isSpotGold ? 'GC=F' : symbol;
-    const yahooData = await fetchYahooCandles(yahooSymbol, interval, daysBack);
-    cache.set(cacheKey, { timestamp: now, data: yahooData });
-    return yahooData;
-  } catch (yahooErr) {
-    console.error(`❌ [MarketData] Tất cả các nguồn dữ liệu cho ${symbol} (${interval}) đều thất bại:`, yahooErr.message);
     return null;
   }
 }

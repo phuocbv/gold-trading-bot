@@ -117,10 +117,6 @@ class GeminiKeyPool {
 // Khởi tạo Key Pool từ danh sách keys trong cấu hình
 const keyPool = new GeminiKeyPool(CONFIG.geminiApiKeys || (CONFIG.geminiApiKey ? [CONFIG.geminiApiKey] : []));
 
-function getClient() {
-  return keyPool.pool[0]?.client || null;
-}
-
 /**
  * Trích xuất chuỗi JSON từ phản hồi text của LLM
  */
@@ -252,10 +248,15 @@ async function validateTradeSignal(signal, marketSnapshot) {
     const { text, modelUsed, keyUsed } = await generateWithKeyPool(prompt);
     const result = extractJson(text);
 
+    // Chuẩn hóa: "false" (chuỗi) không được tính là đồng ý; thiếu hoặc sai điểm tin cậy thì coi là 0 (không duyệt)
+    const isApproved = result.approved === true || String(result.approved).toLowerCase() === 'true';
+    const parsedConfidence = Number(result.confidence);
+    const confidence = Number.isFinite(parsedConfidence) ? parsedConfidence : 0;
+
     // Kiểm tra tính hợp lệ
     return {
-      approved: Boolean(result.approved) && (result.confidence || 0) >= CONFIG.aiMinConfidence,
-      confidence: result.confidence || 75,
+      approved: isApproved && confidence >= CONFIG.aiMinConfidence,
+      confidence,
       trend: result.trend || 'N/A',
       support: result.support || marketSnapshot.recentLow,
       resistance: result.resistance || marketSnapshot.recentHigh,

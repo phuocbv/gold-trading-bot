@@ -6,12 +6,14 @@ if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
 }
 
+// Gộp cả GEMINI_API_KEYS và GEMINI_API_KEY (bỏ giá trị mẫu), để giá trị mẫu của biến này không che key thật của biến kia
 function parseGeminiKeys() {
-  const raw = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
-  return raw
+  const raw = [process.env.GEMINI_API_KEYS, process.env.GEMINI_API_KEY].filter(Boolean).join(',');
+  const keys = raw
     .split(/[,\n]/)
     .map((k) => k.trim())
     .filter((k) => k && !k.includes('YOUR_GEMINI'));
+  return [...new Set(keys)];
 }
 
 const geminiApiKeys = parseGeminiKeys();
@@ -44,7 +46,8 @@ const CONFIG = {
   geminiApiKeys,
   geminiApiKey: geminiApiKeys[0] || null,
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
-  aiFilterEnabled: process.env.AI_FILTER_ENABLED === 'true' || geminiApiKeys.length > 0,
+  // AI_FILTER_ENABLED=false tắt hẳn bộ lọc (vẫn giữ key cho bản tin định kỳ); không đặt thì bật khi có key
+  aiFilterEnabled: process.env.AI_FILTER_ENABLED ? process.env.AI_FILTER_ENABLED === 'true' : geminiApiKeys.length > 0,
   aiMinConfidence: parseInt(process.env.AI_MIN_CONFIDENCE || '75', 10),
 
   // Cấu hình Quản lý Rủi ro & Ngưỡng điểm chiến lược

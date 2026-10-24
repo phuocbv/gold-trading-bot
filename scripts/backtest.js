@@ -111,6 +111,10 @@ function summarize(trades) {
 async function backtestSymbol(symbol, args) {
   const { candles: allCandles, hasRealDelta, isCrypto, source } = await loadCandles(symbol, args);
   const candles = getClosedCandles({ candles: allCandles }, CONFIG.timeframe).candles;
+  if (candles.length < WARMUP + 2) {
+    console.log(`\n⚠️ ${symbol}: chỉ có ${candles.length} nến đã đóng, cần tối thiểu ${WARMUP + 2} (${WINDOW} nến khởi tạo chỉ báo). Tăng --bars.`);
+    return;
+  }
   const cooldown = new SignalCooldown(CONFIG.signalCooldownBars, timeframeToMs(CONFIG.timeframe));
   const trades = [];
 

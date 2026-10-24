@@ -36,9 +36,22 @@ function save() {
 function recordSignal(signal, { candleTime, sent, delivered, source }) {
   load();
   const id = `${signal.symbol}|${signal.action}|${candleTime}`;
-  if (records.some((r) => r.id === id)) return;
-
   const ai = signal.aiReview;
+  const existing = records.find((r) => r.id === id);
+  if (existing) {
+    // Cùng nến trước đó bị AI từ chối, nay được duyệt và gửi đi: cập nhật để thống kê tính đúng là đã gửi
+    if (sent && !existing.sent) {
+      Object.assign(existing, {
+        sent: true,
+        delivered: Boolean(delivered),
+        aiMode: ai ? ai.mode : null,
+        aiConfidence: ai ? ai.confidence : null,
+      });
+      save();
+    }
+    return;
+  }
+
   const signalTime = new Date(candleTime).toISOString();
   records.push({
     id,
@@ -71,21 +84,21 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
 
 /**
  * Cập nhật các lệnh đang mở của một tài sản theo các nến đã đóng mới (chạm TP1 / SL / hết hạn)
- * Ưu tiên nến cùng luồng giá với lúc phát tín hiệu: nguồn dự phòng (vd: Binance PAXG thay cho OANDA XAU)
- * lệch giá vài đô sẽ làm chạm SL/TP sai, nên lệnh chờ dữ liệu đúng nguồn. Nếu nguồn gốc mất liên tục
- * quá thời gian theo dõi (vd: đã đổi TRADINGVIEW_SYMBOL) thì dùng nguồn hiện có để lệnh không bị treo mãi.
+ * Nguồn chính (MARKET_DATA_SOURCE) luôn được dùng để chấm, kể cả cho lệnh phát lúc đang dùng nguồn dự phòng,
+ * vì người dùng đặt lệnh theo giá thật của tài sản. Nến từ nguồn dự phòng (vd: Binance PAXG thay cho OANDA XAU)
+ * lệch giá vài đô nên chỉ dùng cho lệnh cùng luồng giá; lệnh khác nguồn chờ nguồn chính có lại, trừ khi
+ * nguồn gốc mất liên tục quá thời gian theo dõi (vd: đã đổi TRADINGVIEW_SYMBOL) để lệnh không bị treo mãi.
  * @param {string} symbol
  * @param {Array<object>} candles - Chỉ gồm các nến đã đóng, cũ nhất -> mới nhất
- * @param {string} [source] - Nguồn dữ liệu của các nến (marketData.source)
- * @param {number} [now]
+ * @param {object} [feed] - { source: marketData.source, isFallback: nến từ nguồn dự phòng, now }
  */
-function updateOpenSignals(symbol, candles, source, now = Date.now()) {
+function updateOpenSignals(symbol, candles, { source, isFallback = true, now = Date.now() } = {}) {
   load();
   let changed = false;
 
   for (const rec of records) {
     if (rec.symbol !== symbol || rec.status !== 'OPEN') continue;
-    if (rec.source && source && feedKey(rec.source) !== feedKey(source)) {
+    if (isFallback && rec.source && source && feedKey(rec.source) !== feedKey(source)) {
       // Tính từ lúc bắt đầu mất nguồn (không phải lần cập nhật cuối) để khoảng nghỉ cuối tuần không bị tính là mất nguồn
       if (!rec.feedMissingSince) {
         rec.feedMissingSince = new Date(now).toISOString();

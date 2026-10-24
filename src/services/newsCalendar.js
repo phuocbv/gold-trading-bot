@@ -118,12 +118,20 @@ function describeEvent(event) {
 }
 
 /**
- * Các tin đang trong khung chặn tín hiệu (±CONFIG.newsBlackoutMinutes quanh giờ ra tin); rỗng nếu không chặn
+ * Các tin trong khung chặn tín hiệu (±CONFIG.newsBlackoutMinutes quanh giờ ra tin); rỗng nếu không chặn.
+ * Xét cả khoảng thời gian của nến đang phân tích (từ lúc mở nến tới lúc gửi), không chỉ thời điểm gửi:
+ * nến 15m 08:45-09:00 (hoặc nến 1h 08:00-09:00) chứa cú giật của tin 08:30 dù gửi lúc 09:00 đã quá 30 phút.
+ * @param {number} [now] - Thời điểm gửi tín hiệu
+ * @param {number} [candleOpenTime] - Thời điểm mở của nến đang phân tích (mặc định = now)
  */
-function getNewsBlackout(now = Date.now()) {
+function getNewsBlackout(now = Date.now(), candleOpenTime = now) {
   if (!CONFIG.newsEnabled || CONFIG.newsBlackoutMinutes <= 0) return [];
   const windowMs = CONFIG.newsBlackoutMinutes * MINUTE_MS;
-  return relevantEvents().filter((e) => Math.abs(Date.parse(e.time) - now) <= windowMs);
+  const from = Math.min(candleOpenTime, now);
+  return relevantEvents().filter((e) => {
+    const t = Date.parse(e.time);
+    return t > from - windowMs && t <= now + windowMs;
+  });
 }
 
 /**
@@ -153,8 +161,20 @@ async function sendNewsAlert(events, releaseTime, now) {
 /**
  * Chạy mỗi phút: nhắn Telegram cho các tin sẽ ra trong CONFIG.newsAlertMinutes phút tới (mỗi tin chỉ nhắn một lần)
  */
+// Lượt kiểm tra trước chưa xong (Telegram chậm, đang thử lại) thì lượt sau bỏ qua để không nhắn trùng
+let alertCheckRunning = false;
+
 async function checkNewsAlerts(now = Date.now()) {
-  if (!CONFIG.newsEnabled) return;
+  if (!CONFIG.newsEnabled || alertCheckRunning) return;
+  alertCheckRunning = true;
+  try {
+    await runNewsAlerts(now);
+  } finally {
+    alertCheckRunning = false;
+  }
+}
+
+async function runNewsAlerts(now) {
   await refreshCalendar();
 
   const alertMs = CONFIG.newsAlertMinutes * MINUTE_MS;
@@ -166,10 +186,11 @@ async function checkNewsAlerts(now = Date.now()) {
     groups.get(time).push(e);
   }
 
+  // Đánh dấu tất cả trước khi gửi để không nhắn lặp lại nếu Telegram lỗi (sendRawMessage đã tự thử lại)
+  for (const events of groups.values()) state.alerted.push(...events.map((e) => e.id));
+  if (groups.size > 0) save();
+
   for (const [time, events] of groups) {
-    // Đánh dấu trước khi gửi để không nhắn lặp lại mỗi phút nếu Telegram lỗi (sendRawMessage đã tự thử lại)
-    state.alerted.push(...events.map((e) => e.id));
-    save();
     const sent = await sendNewsAlert(events, time, now);
     console.log(`📰 [News] ${sent ? 'Đã nhắn' : 'Không nhắn được'} báo trước ${events.length} tin lúc ${timeFmt.format(new Date(time))}: ${events.map((e) => e.title).join(', ')}`);
   }

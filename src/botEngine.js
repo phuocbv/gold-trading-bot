@@ -103,13 +103,26 @@ async function scanSingleSymbol(symbol) {
   }
 
   // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó theo các nến mới đóng
-  runSafely('SignalTracker', () => signalTracker.updateOpenSignals(symbol, marketData.candles, marketData.source));
+  runSafely('SignalTracker', () => signalTracker.updateOpenSignals(symbol, marketData.candles, {
+    source: marketData.source,
+    isFallback: marketData.isFallback,
+  }));
 
   // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
   const lastClosed = marketData.candles[marketData.candles.length - 1];
   const candleTime = new Date(lastClosed.date).getTime();
-  if (lastAnalyzedCandle.get(symbol) === candleTime) {
-    console.log(`ℹ️ [${symbol}] Nến ${new Date(candleTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })} đã được phân tích, chờ nến mới đóng.`);
+  const candleLabel = new Date(candleTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  // So sánh <= để một nguồn dự phòng trả dữ liệu trễ không làm phân tích lại nến cũ
+  const lastAnalyzed = lastAnalyzedCandle.get(symbol);
+  if (lastAnalyzed != null && candleTime <= lastAnalyzed) {
+    console.log(`ℹ️ [${symbol}] Nến ${candleLabel} đã được phân tích, chờ nến mới đóng.`);
+    return;
+  }
+  // Nến đã đóng quá một khung thời gian (thị trường đóng cửa cuối tuần, dữ liệu trễ, bot vừa khởi động lại):
+  // không phát tín hiệu theo giá cũ
+  const timeframeMs = timeframeToMs(CONFIG.timeframe);
+  if (Date.now() - (candleTime + timeframeMs) > timeframeMs) {
+    console.log(`ℹ️ [${symbol}] Nến gần nhất (${candleLabel}) đã đóng quá lâu (thị trường đóng cửa hoặc dữ liệu trễ), bỏ qua.`);
     return;
   }
   lastAnalyzedCandle.set(symbol, candleTime);
@@ -136,7 +149,7 @@ async function scanSingleSymbol(symbol) {
 
   // Không phát tín hiệu trong khung ±N phút quanh giờ ra tin tác động mạnh (giá giật mạnh, giãn spread)
   // Không đọc được lịch tin thì không chặn (đã ghi log lỗi), để lỗi phụ không làm mất tín hiệu
-  const newsEvents = runSafely('News', () => getNewsBlackout(), []);
+  const newsEvents = runSafely('News', () => getNewsBlackout(Date.now(), candleTime), []);
   if (newsEvents.length > 0) {
     console.log(`⛔ [${snapshot.displayName}] Bỏ qua ${candidateSignals.length} tín hiệu: đang trong khung ±${CONFIG.newsBlackoutMinutes} phút quanh tin ${newsEvents.map(describeEvent).join(', ')}.`);
     return;
