@@ -7,6 +7,7 @@ const RsiDivergenceStrategy = require('./rsiDivergence');
 const VolumeVwapAdxStrategy = require('./volumeVwapAdx');
 const OrderFlowReversalStrategy = require('./orderFlowReversal');
 const DonchianBreakoutStrategy = require('./donchianBreakout');
+const SupertrendStrategy = require('./supertrend');
 const CONFIG = require('../config');
 
 // Danh mục chiến lược theo tên khóa dùng trong cấu hình STRATEGIES
@@ -19,6 +20,7 @@ const registry = {
   'smart-money-flow': new VolumeVwapAdxStrategy(),
   'order-flow': new OrderFlowReversalStrategy(),
   'donchian-55': new DonchianBreakoutStrategy(55),
+  supertrend: new SupertrendStrategy(10, 3),
 };
 for (const [key, strat] of Object.entries(registry)) strat.key = key;
 

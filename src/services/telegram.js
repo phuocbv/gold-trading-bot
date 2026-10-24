@@ -151,6 +151,9 @@ async function sendTradeAlert(signal) {
   if (signal.indicators.donchianHigh != null && signal.indicators.donchianLow != null) {
     msg += `• Kênh Donchian: \`$${signal.indicators.donchianLow.toFixed(2)} - $${signal.indicators.donchianHigh.toFixed(2)}\`\n`;
   }
+  if (signal.indicators.supertrendLine != null) {
+    msg += `• Đường Supertrend: \`$${signal.indicators.supertrendLine.toFixed(2)}\`\n`;
+  }
   if (signal.indicators.fvgZone) {
     msg += `• Vùng FVG: \`${signal.indicators.fvgZone}\`\n`;
   }

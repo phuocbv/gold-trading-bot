@@ -999,7 +999,7 @@
           const enough = s.trades >= c.minTrades;
           return el('td', {},
             el('div', { class: `mx-value ${enough ? signClass(s.avgNet) : 'muted'}` }, s.trades ? fmtR(s.avgNet) : '—'),
-            el('div', { class: 'mx-meta' }, s.trades ? `thắng ${fmtPct(s.winRate)} · ${s.trades} lệnh${enough ? '' : ' (ít lệnh)'}` : 'không có lệnh'),
+            el('div', { class: 'mx-meta', title: enough ? null : `Dưới ${c.minTrades} lệnh, chưa đủ để kết luận` }, s.trades ? `${fmtPct(s.winRate)} · ${s.trades} lệnh` : 'không có lệnh'),
             s.pass || on ? el('div', { class: 'mx-badges' },
               s.pass ? el('span', { class: 'status tp' }, el('i', { 'aria-hidden': 'true' }, '✓'), 'Đạt chuẩn') : null,
               on ? el('span', { class: 'pill' }, 'Đang bật') : null) : null);
@@ -1007,13 +1007,14 @@
       blocks.push(el('section', { class: 'card' },
         el('div', { class: 'card-head' }, el('div', {},
           el('h2', {}, `${name}: phương pháp × khung thời gian`),
-          el('p', { class: 'note' }, `R/lệnh sau chi phí, tỉ lệ thắng và số lệnh khi chạy riêng từng phương pháp; ô màu xám: dưới ${c.minTrades} lệnh, chưa đủ để kết luận`))),
+          el('p', { class: 'note' }, `Mỗi ô: R/lệnh sau chi phí, tỉ lệ thắng · số lệnh khi chạy riêng từng phương pháp; số màu xám: dưới ${c.minTrades} lệnh, chưa đủ để kết luận`))),
         el('div', { class: 'table-wrap' }, el('table', { class: 'matrix' }, el('thead', {}, matrixHead), el('tbody', {}, matrixRows))),
         errors.length ? el('p', { class: 'note' }, `Lỗi: ${errors.map((e) => `${e.timeframe}: ${e.error}`).join(' · ')}`) : null));
 
       // Chi tiết theo khung
       if (!tfs.includes(state.btTimeframe)) {
-        state.btTimeframe = (results.find((r) => r.strategies.some((s) => s.pass)) || {}).timeframe
+        state.btTimeframe = (results.find((r) => r.strategies.some((s) => s.pass && isActive(r.timeframe, s.key)))
+          || results.find((r) => r.strategies.some((s) => s.pass)) || {}).timeframe
           || tfs.find((t) => (active[t] || []).length) || tfs[tfs.length - 1];
       }
       const res = results.find((r) => r.timeframe === state.btTimeframe);

@@ -175,7 +175,10 @@ async function scanSingleSymbol(symbol, timeframe = CONFIG.timeframe, strategyLi
 
   // Không phát tín hiệu trong khung ±N phút quanh giờ ra tin tác động mạnh (giá giật mạnh, giãn spread)
   // Không đọc được lịch tin thì không chặn (đã ghi log lỗi), để lỗi phụ không làm mất tín hiệu
-  const newsEvents = runSafely('News', () => getNewsBlackout(Date.now(), candleTime), []);
+  // Xét lùi theo cây nến tối đa 60 phút: đủ để chặn nến 15m-1h chứa cú giật của tin, nhưng không chặn
+  // tín hiệu nến 2h/4h/1D chỉ vì có tin ra từ nhiều giờ trước trong cùng cây nến
+  const blackoutFrom = Math.max(candleTime, Date.now() - 60 * 60 * 1000);
+  const newsEvents = runSafely('News', () => getNewsBlackout(Date.now(), blackoutFrom), []);
   if (newsEvents.length > 0) {
     console.log(`⛔ [${snapshot.displayName}] Bỏ qua ${candidateSignals.length} tín hiệu: đang trong khung ±${CONFIG.newsBlackoutMinutes} phút quanh tin ${newsEvents.map(describeEvent).join(', ')}.`);
     return;

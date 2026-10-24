@@ -26,9 +26,9 @@ Hệ thống tự động phân tích thị trường Vàng (XAU/USD) & Crypto (
 - Hỗ trợ chế độ kiểm tra nhanh 1 lần: `node bot.js --once`.
 
 ### 3. Chạy Nhiều Khung Thời Gian & Báo Cáo Backtest:
-- Mỗi phương pháp chạy ở khung riêng qua biến `STRATEGIES` (vd: `donchian-55@4h`). Mặc định: các phương pháp cũ ở `TIMEFRAME` (15m) và **Donchian Breakout (Turtle 55 + EMA200)** ở khung 4h (khung 1h đạt chuẩn sát ngưỡng, bật bằng `donchian-55@1h` nếu muốn).
-- Donchian 55 được thêm vì là phương pháp duy nhất đạt chuẩn backtest trên Vàng thật: lãi ở cả giai đoạn đầu và sau, vượt lệnh ngẫu nhiên cùng xu hướng (p < 0,05), ≥ 100 lệnh, profit factor ≥ 1,2 (khung 4h: 215 lệnh, thắng 45%, +0,33R/lệnh sau spread).
-- Dashboard `/dashboard#backtest`: ma trận phương pháp × khung (15m/30m/1h/4h) với tỉ lệ thắng, R/lệnh, profit factor, đối chứng ngẫu nhiên. Bot tự cập nhật báo cáo hằng tuần ở tiến trình riêng; chạy tay: `npm run backtest:report`.
+- Mỗi phương pháp chạy ở khung riêng qua biến `STRATEGIES` (vd: `donchian-55@4h`). Mặc định: 6 phương pháp cũ ở `TIMEFRAME` (15m, đã tắt Order Flow), **Donchian Breakout (Turtle 55 + EMA200)** ở khung 2h, 4h, 1D và **Supertrend (10,3 + EMA200)** ở khung 1D.
+- Hai phương pháp này được thêm vì đạt chuẩn backtest trên Vàng thật (đã trừ spread): lãi ở cả giai đoạn đầu và sau, vượt lệnh ngẫu nhiên cùng xu hướng (p < 0,05), profit factor ≥ 1,2. Donchian 2h (2 năm gần nhất): 181 lệnh, thắng 46%, +0,38R/lệnh; Supertrend 1D lãi ở cả 5 giai đoạn thị trường 1990-2026.
+- Dashboard `/dashboard#backtest`: ma trận phương pháp × khung (15m/30m/1h/2h/4h/1D) với tỉ lệ thắng, R/lệnh, profit factor, đối chứng ngẫu nhiên. Bot tự cập nhật báo cáo hằng tuần ở tiến trình riêng; chạy tay: `npm run backtest:report`.
 - Backtest dòng lệnh: `npm run backtest` (theo `STRATEGIES`), hoặc `node scripts/backtest.js XAU/USD --timeframe 4h --strategies donchian-55`.
 
 ---

@@ -26,9 +26,13 @@ const rawSymbols = process.env.SYMBOLS || process.env.SYMBOL || 'XAU/USD';
 const timeframe = process.env.TIMEFRAME || '15m';
 
 // Phương pháp và khung thời gian chạy: "tên@khung" cách nhau bởi dấu phẩy; thiếu "@khung" thì dùng TIMEFRAME.
-// Donchian 55 đạt chuẩn backtest rõ nhất ở khung 4h (lỗ ở 15m); khung 1h đạt chuẩn sát ngưỡng và đang lỗ
-// trong vài tháng gần nhất nên mặc định chưa bật (thêm "donchian-55@1h" vào STRATEGIES nếu muốn chạy).
-const DEFAULT_STRATEGIES = 'trend-following,mean-reversion,volatility-breakout,smc-lite,rsi-divergence,smart-money-flow,order-flow,donchian-55@4h';
+// Theo backtest Vàng (2 năm gần nhất và 40 năm khung ngày, đã trừ spread):
+// - Donchian 55 lãi cả hai năm ở mọi khung từ 30m tới 1D, tốt nhất ở 2h (+0.38R/lệnh), 4h (+0.34R) và 1D
+// - Supertrend(10,3) chỉ có lợi thế ở khung ngày (lãi ở cả 5 giai đoạn thị trường 1990-2026)
+// - Order Flow lỗ ở gần như mọi khung nên mặc định tắt (vẫn bật lại được bằng "order-flow")
+// Donchian 1h đạt chuẩn sát ngưỡng và đang lỗ vài tháng gần nhất nên chưa bật (thêm "donchian-55@1h" nếu muốn).
+const DEFAULT_STRATEGIES = 'trend-following,mean-reversion,volatility-breakout,smc-lite,rsi-divergence,smart-money-flow,'
+  + 'donchian-55@2h,donchian-55@4h,donchian-55@1d,supertrend@1d';
 function parseStrategyPlan(raw) {
   return parseList(raw).map((entry) => {
     const [key, tf] = entry.split('@');
@@ -95,7 +99,7 @@ const CONFIG = {
   // Báo cáo backtest trên dashboard: chạy định kỳ ở tiến trình riêng (mặc định 9:00 Chủ nhật, thị trường Vàng nghỉ)
   backtestReportEnabled: process.env.BACKTEST_REPORT_ENABLED !== 'false',
   backtestReportCron: process.env.BACKTEST_REPORT_CRON || '0 9 * * 0',
-  backtestReportTimeframes: parseList(process.env.BACKTEST_REPORT_TIMEFRAMES || '15m,30m,1h,4h').map((t) => t.toLowerCase()),
+  backtestReportTimeframes: parseList(process.env.BACKTEST_REPORT_TIMEFRAMES || '15m,30m,1h,2h,4h,1d').map((t) => t.toLowerCase()),
   backtestReportPath: process.env.BACKTEST_REPORT_PATH || path.join(__dirname, '..', 'data', 'backtest-report.json'),
 };
 

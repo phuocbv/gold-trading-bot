@@ -15,8 +15,8 @@ const { CANDLE_LIMIT, timeframeToMs, resolveSymbolSources } = require('../servic
 const PASS_CRITERIA = { minTrades: 100, maxP: 0.05, minProfitFactor: 1.2, splitRatio: 0.6 };
 const RANDOM_SEEDS = 200;
 // Số nến tải cho từng khung (gồm CANDLE_LIMIT nến khởi tạo), dùng chung cho CLI và báo cáo để ra cùng kết quả.
-// TradingView ẩn danh trả tối đa ~5.500 nến 15m
-const DEFAULT_BARS = { '15m': 6000, '30m': 10000, '1h': 11000, '4h': 6000 };
+// TradingView ẩn danh giới hạn lịch sử: 15m ~5.500 nến, 30m từ đầu năm nay, 1h/2h từ năm trước, 4h ~4 năm, 1D ~40 năm
+const DEFAULT_BARS = { '15m': 6000, '30m': 10000, '1h': 11000, '2h': 8000, '4h': 6000, '1d': 10000 };
 
 /**
  * Chi phí mỗi lệnh quy về đơn vị giá: Vàng spread $0.35/oz, Crypto phí 0.1% x 2 chiều
