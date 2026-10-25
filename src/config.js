@@ -100,6 +100,8 @@ const CONFIG = {
   backtestReportCron: process.env.BACKTEST_REPORT_CRON || '0 9 * * 0',
   backtestReportTimeframes: parseList(process.env.BACKTEST_REPORT_TIMEFRAMES || '15m,30m,1h,2h,4h,1d').map((t) => t.toLowerCase()),
   backtestReportPath: process.env.BACKTEST_REPORT_PATH || path.join(__dirname, '..', 'data', 'backtest-report.json'),
+  // Backtest theo tháng (năm hiện tại) của các phương pháp đang bật, tạo cùng lịch với báo cáo backtest
+  backtestMonthlyPath: process.env.BACKTEST_MONTHLY_PATH || path.join(__dirname, '..', 'data', 'backtest-monthly.json'),
 };
 
 module.exports = CONFIG;

@@ -53,12 +53,13 @@ function simulate(candles, index, signal, horizon) {
     const hit = checkCandleHit(signal, candles[j]);
     if (hit) return { outcome: hit, r: rMultiple(signal, hit === 'SL' ? signal.stopLoss : signal.takeProfit) };
   }
-  return { outcome: 'EXPIRED', r: rMultiple(signal, candles[lastIndex].close) };
+  // open: hết dữ liệu trước khi đủ horizon, lệnh còn đang mở và R chỉ là tạm tính
+  return { outcome: 'EXPIRED', r: rMultiple(signal, candles[lastIndex].close), open: lastIndex < index + horizon };
 }
 
 function toTrade(candles, index, signal, { symbol, horizon, spread }) {
   const risk = Math.abs(signal.entry - signal.stopLoss);
-  const { outcome, r } = simulate(candles, index, signal, horizon);
+  const { outcome, r, open = false } = simulate(candles, index, signal, horizon);
   return {
     index,
     time: candles[index].date.getTime(),
@@ -66,6 +67,7 @@ function toTrade(candles, index, signal, { symbol, horizon, spread }) {
     action: signal.action,
     score: signal.score,
     outcome,
+    open,
     r,
     net: r - tradeCost(symbol, signal.entry, spread) / risk,
   };

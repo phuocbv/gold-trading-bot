@@ -46,6 +46,7 @@ function registerDashboard(app) {
   app.get('/api/backtest', requireToken, (req, res) => {
     res.json({
       report: readJson(CONFIG.backtestReportPath, null),
+      monthly: readJson(CONFIG.backtestMonthlyPath, null),
       job: getReportJobStatus(),
       // Phương pháp đang bật theo từng khung, để báo cáo đánh dấu đúng kể cả khi cấu hình đổi sau lần chạy báo cáo
       active: Object.fromEntries([...getStrategyPlan()].map(([tf, list]) => [tf, list.map((s) => s.key)])),

@@ -29,6 +29,7 @@ Hệ thống tự động phân tích thị trường Vàng (XAU/USD) & Crypto (
 - Mỗi phương pháp chạy ở khung riêng qua biến `STRATEGIES` (vd: `donchian-55@4h`). Mặc định: 6 phương pháp cũ ở `TIMEFRAME` (15m, đã tắt Order Flow), **Donchian Breakout (Turtle 55 + EMA200)** ở khung 1h, 2h, 4h, 1D và **Supertrend (10,3 + EMA200)** ở khung 1D.
 - Hai phương pháp này được thêm vì đạt chuẩn backtest trên Vàng thật (đã trừ spread): lãi ở cả giai đoạn đầu và sau, vượt lệnh ngẫu nhiên cùng xu hướng (p < 0,05), profit factor ≥ 1,2. Donchian 2h (2 năm gần nhất): 181 lệnh, thắng 46%, +0,38R/lệnh; Supertrend 1D lãi ở cả 5 giai đoạn thị trường 1990-2026.
 - Dashboard `/dashboard#backtest`: ma trận phương pháp × khung (15m/30m/1h/2h/4h/1D) với tỉ lệ thắng, R/lệnh, profit factor, đối chứng ngẫu nhiên. Bot tự cập nhật báo cáo hằng tuần ở tiến trình riêng; chạy tay: `npm run backtest:report`.
+- Mục **Theo tháng** trên tab báo cáo: tỉ lệ thắng và tổng R từng tháng của năm hiện tại cho mỗi phương pháp đang bật, kèm dòng gộp theo quy trình bot ở mỗi khung và dòng toàn bot. Khung 15m của Vàng lấy dữ liệu Binance Futures XAUUSDT (lọc theo giờ giao dịch OANDA) vì TradingView ẩn danh chỉ có ~5.500 nến 15m. Tạo cùng lịch với báo cáo backtest; chạy tay: `npm run backtest:monthly` hoặc `node scripts/backtestMonthly.js XAU/USD --year 2026`.
 - Backtest dòng lệnh: `npm run backtest` (theo `STRATEGIES`), hoặc `node scripts/backtest.js XAU/USD --timeframe 4h --strategies donchian-55`.
 
 ---

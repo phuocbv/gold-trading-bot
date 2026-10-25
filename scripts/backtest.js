@@ -13,9 +13,8 @@
  * CANDLE_LIMIT nến đầu chỉ dùng để khởi tạo chỉ báo, không giao dịch. Kết quả tính theo R (1R = Entry -> SL), chỉ xét TP1.
  * Nếu SL và TP1 cùng nằm trong một nến thì tính là chạm SL (giả định bi quan).
  */
-const axios = require('axios');
 const CONFIG = require('../src/config');
-const { fetchTradingViewHistory, resolveSymbolSources, getClosedCandles, CANDLE_LIMIT } = require('../src/services/marketData');
+const { fetchTradingViewHistory, fetchBinanceHistory, resolveSymbolSources, getClosedCandles, CANDLE_LIMIT } = require('../src/services/marketData');
 const { registry, getStrategyPlan } = require('../src/strategies');
 const { runBacktest, summarize, costLabel, DEFAULT_BARS } = require('../src/backtest/engine');
 
@@ -46,32 +45,6 @@ function buildRuns(args) {
   }
   if (args.strategies) return [[CONFIG.timeframe, pick(args.strategies)]];
   return [...plan.entries()];
-}
-
-async function fetchBinanceHistory(binanceSymbol, interval, bars) {
-  let endTime = Date.now();
-  let rows = [];
-  while (rows.length < bars) {
-    const limit = Math.min(1000, bars - rows.length);
-    const url = `https://data-api.binance.vision/api/v3/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}&endTime=${endTime}`;
-    const { data } = await axios.get(url, { timeout: 15000 });
-    if (!Array.isArray(data) || data.length === 0) break;
-    rows = data.concat(rows);
-    endTime = data[0][0] - 1;
-  }
-  return rows.map((k) => {
-    const volume = parseFloat(k[5]);
-    const buyVolume = parseFloat(k[9] || 0);
-    return {
-      date: new Date(k[0]),
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-      volume,
-      delta: buyVolume - (volume - buyVolume),
-    };
-  });
 }
 
 async function loadCandles(symbol, timeframe, args) {

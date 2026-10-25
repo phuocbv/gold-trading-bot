@@ -57,6 +57,8 @@ function resolveSymbolSources(rawSymbol = 'XAU/USD') {
       displayName: 'Vàng (XAU/USD)',
       tradingViewSymbol: CONFIG.tradingViewSymbol || 'OANDA:XAUUSD',
       binanceSymbol: 'PAXGUSDT',
+      // Hợp đồng vĩnh cửu Binance Futures bám giá vàng giao ngay (có từ 12/2025), dùng cho backtest dài
+      binanceFuturesSymbol: 'XAUUSDT',
       yahooSymbol: 'GC=F',
       isCrypto: false,
     };
@@ -381,6 +383,41 @@ async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', 
 }
 
 /**
+ * Lịch sử nến dài từ Binance cho backtest, tải lùi dần theo endTime
+ * @param {string} binanceSymbol - Ví dụ: 'ETHUSDT', hoặc 'XAUUSDT' với futures
+ * @param {string} interval - '15m', '1h', '4h', '1d'
+ * @param {number} bars - Số nến cần (ít hơn nếu mã chưa có đủ lịch sử)
+ * @param {object} [options] - { futures: true } để lấy từ Binance Futures USDⓈ-M thay vì Spot
+ */
+async function fetchBinanceHistory(binanceSymbol, interval, bars, { futures = false } = {}) {
+  const base = futures ? 'https://fapi.binance.com/fapi/v1/klines' : `${BINANCE_ENDPOINTS[0]}/api/v3/klines`;
+  const pageSize = futures ? 1500 : 1000;
+  let endTime = Date.now();
+  let rows = [];
+  while (rows.length < bars) {
+    const limit = Math.min(pageSize, bars - rows.length);
+    const url = `${base}?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}&endTime=${endTime}`;
+    const { data } = await axios.get(url, { timeout: 15000 });
+    if (!Array.isArray(data) || data.length === 0) break;
+    rows = data.concat(rows);
+    endTime = data[0][0] - 1;
+  }
+  return rows.map((k) => {
+    const volume = parseFloat(k[5]);
+    const buyVolume = parseFloat(k[9] || 0);
+    return {
+      date: new Date(k[0]),
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume,
+      delta: buyVolume - (volume - buyVolume),
+    };
+  });
+}
+
+/**
  * Tương thích ngược: Lấy dữ liệu Vàng từ Binance PAXGUSDT
  */
 async function fetchBinanceSpotGold(interval = '15m', limit = 500) {
@@ -629,6 +666,7 @@ module.exports = {
   fetchTradingViewCandles,
   fetchTradingViewHistory,
   fetchBinanceKlines,
+  fetchBinanceHistory,
   fetchBinanceSpotGold,
   fetchYahooCandles,
   resolveSymbolSources,
