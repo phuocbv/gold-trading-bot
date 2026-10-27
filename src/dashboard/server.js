@@ -5,6 +5,35 @@ const { getStrategyPlan } = require('../strategies');
 const { primaryStrategyName } = require('../tradeOutcome');
 const { readJson } = require('../services/jsonStore');
 const { getReportJobStatus } = require('../backtest/reportJob');
+const { parseDay, daySignalsFor } = require('../backtest/daySignals');
+const { dayKey } = require('../backtest/monthly');
+
+// Kiểm tra tín hiệu theo ngày tải dữ liệu mất vài giây: chạy lần lượt từng yêu cầu và giữ kết quả mỗi ngày trong một phút
+const DAY_CHECK_TTL_MS = 60 * 1000;
+const dayChecks = new Map();
+let dayCheckQueue = Promise.resolve();
+
+function checkDay(day) {
+  const now = Date.now();
+  for (const [key, entry] of dayChecks) if (now - entry.at > DAY_CHECK_TTL_MS) dayChecks.delete(key);
+  if (!dayChecks.has(day)) {
+    const run = dayCheckQueue.then(async () => {
+      const plan = getStrategyPlan();
+      const results = [];
+      for (const symbol of CONFIG.symbols) {
+        try {
+          results.push(await daySignalsFor(symbol, plan, day));
+        } catch (err) {
+          results.push({ symbol, day, error: err.message });
+        }
+      }
+      return { day, generatedAt: new Date().toISOString(), results };
+    });
+    dayCheckQueue = run.catch(() => {});
+    dayChecks.set(day, { at: now, promise: run });
+  }
+  return dayChecks.get(day).promise;
+}
 
 /**
  * Chặn truy cập dashboard khi có cấu hình DASHBOARD_TOKEN mà URL không kèm ?token= đúng
@@ -51,6 +80,20 @@ function registerDashboard(app) {
       // Phương pháp đang bật theo từng khung, để báo cáo đánh dấu đúng kể cả khi cấu hình đổi sau lần chạy báo cáo
       active: Object.fromEntries([...getStrategyPlan()].map(([tf, list]) => [tf, list.map((s) => s.key)])),
     });
+  });
+
+  // Các phương pháp đang bật cho tín hiệu gì trong một ngày (?date=YYYY-MM-DD, giờ VN)
+  app.get('/api/backtest/day', requireToken, async (req, res) => {
+    const day = parseDay(String(req.query.date || ''));
+    if (!day || day > dayKey(Date.now())) {
+      res.status(400).json({ error: 'Ngày không hợp lệ hoặc chưa tới' });
+      return;
+    }
+    try {
+      res.json(await checkDay(day));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 }
 

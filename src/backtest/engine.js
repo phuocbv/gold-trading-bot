@@ -51,23 +51,28 @@ function simulate(candles, index, signal, horizon) {
   const lastIndex = Math.min(candles.length - 1, index + horizon);
   for (let j = index + 1; j <= lastIndex; j++) {
     const hit = checkCandleHit(signal, candles[j]);
-    if (hit) return { outcome: hit, r: rMultiple(signal, hit === 'SL' ? signal.stopLoss : signal.takeProfit) };
+    if (hit) return { outcome: hit, r: rMultiple(signal, hit === 'SL' ? signal.stopLoss : signal.takeProfit), exit: j };
   }
   // open: hết dữ liệu trước khi đủ horizon, lệnh còn đang mở và R chỉ là tạm tính
-  return { outcome: 'EXPIRED', r: rMultiple(signal, candles[lastIndex].close), open: lastIndex < index + horizon };
+  return { outcome: 'EXPIRED', r: rMultiple(signal, candles[lastIndex].close), open: lastIndex < index + horizon, exit: lastIndex };
 }
 
 function toTrade(candles, index, signal, { symbol, horizon, spread }) {
   const risk = Math.abs(signal.entry - signal.stopLoss);
-  const { outcome, r, open = false } = simulate(candles, index, signal, horizon);
+  const { outcome, r, open = false, exit } = simulate(candles, index, signal, horizon);
   return {
     index,
     time: candles[index].date.getTime(),
     strategy: primaryStrategyName(signal.strategy),
     action: signal.action,
     score: signal.score,
+    entry: signal.entry,
+    stopLoss: signal.stopLoss,
+    takeProfit: signal.takeProfit,
     outcome,
     open,
+    // Thời điểm mở của nến chạm TP1/SL (hoặc nến cuối khi hết hạn / hết dữ liệu)
+    exitTime: candles[exit].date.getTime(),
     r,
     net: r - tradeCost(symbol, signal.entry, spread) / risk,
   };
@@ -81,9 +86,11 @@ function toTrade(candles, index, signal, { symbol, horizon, spread }) {
  * @param {string} params.timeframe
  * @param {Array<object>} [params.strategies] - Chạy gộp theo đúng quy trình bot (hợp lưu, xung đột, ngưỡng điểm, cooldown)
  * @param {Array<object>} [params.standalone] - Chạy riêng từng chiến lược (mỗi chiến lược có cooldown riêng)
+ * @param {number} [params.warmup] - Index nến đầu tiên được phân tích
+ * @param {number} [params.end] - Chỉ phân tích các nến có index < end; mặc định bỏ nến cuối vì chưa có nến sau để tính kết quả
  * @returns {{ combined: Array<object>, perStrategy: Map<string, Array<object>>, warmup: number }}
  */
-function runBacktest({ symbol, candles, timeframe, strategies = [], standalone = [], horizon = CONFIG.signalTrackHorizonBars, spread = null, hasRealDelta = false, isCrypto, warmup = CANDLE_LIMIT - 1 }) {
+function runBacktest({ symbol, candles, timeframe, strategies = [], standalone = [], horizon = CONFIG.signalTrackHorizonBars, spread = null, hasRealDelta = false, isCrypto, warmup = CANDLE_LIMIT - 1, end = candles.length - 1 }) {
   const crypto = isCrypto ?? resolveSymbolSources(symbol).isCrypto;
   const windowMs = timeframeToMs(timeframe);
   const combined = [];
@@ -92,7 +99,7 @@ function runBacktest({ symbol, candles, timeframe, strategies = [], standalone =
   const ownCooldown = new Map(standalone.map((s) => [s.key, new SignalCooldown(CONFIG.signalCooldownBars, windowMs)]));
   const opts = { symbol, horizon, spread };
 
-  for (let i = warmup; i < candles.length - 1; i++) {
+  for (let i = warmup; i < end; i++) {
     const marketData = toMarketData(candles.slice(Math.max(0, i + 1 - CANDLE_LIMIT), i + 1), { hasRealDelta, isCrypto: crypto });
     const candleTime = candles[i].date.getTime();
 

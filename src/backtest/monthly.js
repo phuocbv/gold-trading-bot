@@ -1,16 +1,19 @@
 /**
- * Backtest theo tháng cho các phương pháp đang bật (STRATEGIES) trong một năm, dùng chung cho
- * `npm run backtest:monthly` và mục "Theo tháng" trên dashboard. Mỗi khung chạy đúng quy trình bot
- * (hợp lưu, xung đột, ngưỡng điểm, cooldown); tháng tính theo giờ Việt Nam của thời điểm vào lệnh.
+ * Backtest theo tháng và theo ngày cho các phương pháp đang bật (STRATEGIES) trong một năm, dùng chung cho
+ * `npm run backtest:monthly` và mục "Theo tháng", "Theo ngày" trên dashboard. Mỗi khung chạy đúng quy trình bot
+ * (hợp lưu, xung đột, ngưỡng điểm, cooldown); tháng và ngày tính theo giờ Việt Nam của thời điểm vào lệnh.
  */
 const { fetchTradingViewHistory, fetchBinanceHistory, resolveSymbolSources, getClosedCandles, timeframeToMs, CANDLE_LIMIT } = require('../services/marketData');
 const { runBacktest, summarize, costLabel, DEFAULT_BARS } = require('./engine');
 const { primaryStrategyName } = require('../tradeOutcome');
 
 const HOUR_MS = 3600e3;
-const monthFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit' });
-// 'YYYY-MM' theo giờ Việt Nam, so sánh chuỗi được như so sánh thời gian
-const monthKey = (t) => monthFmt.format(new Date(t));
+const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' });
+// 'YYYY-MM-DD' và 'YYYY-MM' theo giờ Việt Nam, so sánh chuỗi được như so sánh thời gian
+const dayKey = (t) => dayFmt.format(new Date(t));
+const monthKey = (t) => dayKey(t).slice(0, 7);
+// Thời điểm 0h của ngày 'YYYY-MM-DD' theo giờ Việt Nam (UTC+7, không đổi giờ mùa hè)
+const dayStart = (day) => Date.parse(`${day}T00:00:00+07:00`);
 
 /**
  * Các tháng của năm cần thống kê: tới tháng hiện tại nếu là năm nay
@@ -31,25 +34,22 @@ function firstEntry(candles, timeframe) {
 }
 
 /**
- * Nến đã đóng phủ được cả năm `year`. Ưu tiên TradingView (nguồn bot dùng khi chạy thật); nếu lịch sử TradingView
- * ẩn danh không về tới đầu năm (vd: 15m chỉ ~5.500 nến) thì dùng Binance cho cả giai đoạn để không nối hai nguồn:
+ * Nến đã đóng đủ để vào lệnh từ thời điểm `since` tới nay. Ưu tiên TradingView (nguồn bot dùng khi chạy thật); nếu lịch sử
+ * TradingView ẩn danh không về tới `since` (vd: 15m chỉ ~5.500 nến) thì dùng Binance cho cả giai đoạn để không nối hai nguồn:
  * Crypto lấy Binance Spot (cùng dữ liệu với mã BINANCE: trên TradingView), Vàng khung <= 1h lấy hợp đồng
  * XAUUSDT Binance Futures và chỉ giữ các nến trong giờ OANDA có giao dịch (theo nến 1h OANDA, khớp cả ngày lễ).
  */
-async function loadCandles(symbol, timeframe, year, fetchTv) {
+async function loadCandles(symbol, timeframe, since, fetchTv) {
   const sources = resolveSymbolSources(symbol);
   const closed = (candles) => getClosedCandles({ candles }, timeframe).candles;
-  const covers = (candles) => {
-    const t = firstEntry(candles, timeframe);
-    return Number.isFinite(t) && monthKey(t) < `${year}-01`;
-  };
+  const covers = (candles) => firstEntry(candles, timeframe) <= since;
   const tv = closed(await fetchTv(timeframe));
   const primary = { candles: tv, source: `TradingView (${sources.tradingViewSymbol})`, fallback: false };
   if (covers(tv)) return primary;
 
   const tfMs = timeframeToMs(timeframe);
   // Binance chạy 24/7 nên số nến theo thời gian là đủ; thêm dư cho phần khởi tạo và nến bị lọc ngoài giờ
-  const bars = Math.ceil((Date.now() - Date.UTC(year, 0, 1)) / tfMs) + 2 * CANDLE_LIMIT;
+  const bars = Math.ceil((Date.now() - since) / tfMs) + 2 * CANDLE_LIMIT;
   try {
     let alt = null;
     if (sources.isCrypto) {
@@ -68,7 +68,7 @@ async function loadCandles(symbol, timeframe, year, fetchTv) {
       if (firstEntry(alt.candles, timeframe) < firstEntry(tv, timeframe)) return { ...alt, fallback: true };
     }
   } catch (err) {
-    console.warn(`⚠️ [BacktestMonthly] ${symbol} ${timeframe}: không tải được dữ liệu Binance (${err.message}), dùng TradingView.`);
+    console.warn(`⚠️ [Backtest] ${symbol} ${timeframe}: không tải được dữ liệu Binance (${err.message}), dùng TradingView.`);
   }
   return primary;
 }
@@ -101,7 +101,27 @@ function stats(trades) {
 }
 
 /**
- * Một dòng của bảng: thống kê cả năm và từng tháng. coverage của tháng: 'none' (chưa có dữ liệu),
+ * Thống kê từng ngày có lệnh, kèm danh sách lệnh của ngày đó theo thứ tự thời gian
+ */
+function byDay(trades) {
+  const groups = new Map();
+  for (const t of [...trades].sort((a, b) => a.entryTime - b.entryTime)) groups.set(t.day, [...(groups.get(t.day) || []), t]);
+  return Object.fromEntries([...groups].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, list]) => [day, {
+    ...stats(list),
+    list: list.map((t) => ({
+      time: new Date(t.entryTime).toISOString(),
+      strategy: t.strategy,
+      timeframe: t.timeframe,
+      action: t.action,
+      outcome: t.outcome,
+      open: t.open,
+      net: +t.net.toFixed(2),
+    })),
+  }]));
+}
+
+/**
+ * Một dòng của bảng: thống kê cả năm, từng tháng và từng ngày có lệnh. coverage của tháng: 'none' (chưa có dữ liệu),
  * 'partial' (dữ liệu bắt đầu giữa tháng) hoặc 'full'
  */
 function buildRow(row, trades, months, from) {
@@ -114,6 +134,7 @@ function buildRow(row, trades, months, from) {
       ...stats(trades.filter((t) => t.month === m)),
       coverage: m < fromMonth ? 'none' : m === fromMonth ? 'partial' : 'full',
     }])),
+    days: byDay(trades),
   };
 }
 
@@ -139,15 +160,20 @@ async function monthlyReportFor(symbol, plan, year) {
   for (const [timeframe, active] of plan) {
     const keys = active.map((s) => s.key);
     try {
-      const { candles, source, fallback } = await loadCandles(symbol, timeframe, year, fetchTv);
+      const { candles, source, fallback } = await loadCandles(symbol, timeframe, dayStart(`${year}-01-01`), fetchTv);
       if (candles.length <= CANDLE_LIMIT) {
         timeframes.push({ timeframe, keys, source, error: `Chỉ có ${candles.length} nến, cần hơn ${CANDLE_LIMIT}` });
         continue;
       }
       const tfMs = timeframeToMs(timeframe);
       const from = firstEntry(candles, timeframe);
+      // Vào lệnh ở giá đóng cửa nến tín hiệu nên thời điểm vào lệnh là lúc nến đóng
       const inYear = (trades) => trades
-        .map((t) => ({ ...t, month: monthKey(t.time + tfMs) }))
+        .map((t) => {
+          const entryTime = t.time + tfMs;
+          const day = dayKey(entryTime);
+          return { ...t, timeframe, entryTime, day, month: day.slice(0, 7) };
+        })
         .filter((t) => t.month.startsWith(`${year}-`));
 
       // Khung chỉ có một phương pháp thì chạy gộp cũng chính là chạy riêng phương pháp đó
@@ -183,7 +209,9 @@ async function monthlyReportFor(symbol, plan, year) {
 }
 
 module.exports = {
-  monthKey,
+  dayKey,
+  dayStart,
   monthsOf,
+  loadCandles,
   monthlyReportFor,
 };

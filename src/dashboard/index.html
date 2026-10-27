@@ -211,6 +211,16 @@
   .bt-info { color: var(--text-2); font-size: 13px; margin: 0 0 12px; }
   .matrix tr.total td { border-top: 1px solid var(--axis); }
   .matrix.monthly th, .matrix.monthly td { padding-left: 5px; padding-right: 5px; }
+  h3 { font-size: 14px; font-weight: 600; margin: 20px 0 4px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn {
+    font: inherit; font-size: 14px; font-weight: 600; color: var(--text-1); cursor: pointer;
+    background: var(--hover); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; min-height: 34px;
+  }
+  .btn:disabled { cursor: default; color: var(--muted); }
+  .link-button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+  .link-button:hover { text-decoration: underline; }
+  .sub-head { color: var(--text-2); font-size: 13px; margin: 14px 0 2px; }
 </style>
 </head>
 <body>
@@ -332,6 +342,8 @@
     </section>
     <div id="bt-body"></div>
     <div id="bt-monthly"></div>
+    <div id="bt-daycheck"></div>
+    <div id="bt-daily"></div>
     <p class="footnote" id="bt-footnote"></p>
   </div>
 </main>
@@ -363,6 +375,10 @@
     view: 'live',
     btTimeframe: null,
     btMetric: 'win',
+    // Tháng đang xem ở bảng theo ngày; mặc định tháng gần nhất của báo cáo
+    btDayMonth: null,
+    // Kiểm tra tín hiệu theo ngày: { day, loading, result, error }
+    dayCheck: { day: null },
     filters: { range: 'ALL', symbol: 'ALL', strategy: 'ALL', timeframe: 'ALL', sent: 'SENT', unit: 'USD' },
     sizes: {},
   };
@@ -1163,6 +1179,270 @@
     }));
   }
 
+  // ---------- Backtest theo ngày ----------
+  const WEEKDAYS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  const ACTION_LABELS = { BUY: 'MUA', SELL: 'BÁN' };
+  const OUTCOME_LABELS = { TP: 'TP1', SL: 'SL', EXPIRED: 'hết hạn' };
+  // 'YYYY-MM-DD' theo giờ VN, khớp khóa ngày của báo cáo
+  const vnDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const vnDayKey = (t) => vnDayFmt.format(new Date(t));
+  const clockFmt = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' });
+  const fmtDay = (key) => `${WEEKDAYS[new Date(`${key}T00:00:00Z`).getUTCDay()]} ${key.slice(8)}/${key.slice(5, 7)}`;
+
+  // Các ngày của tháng, tới ngày tạo báo cáo nếu là tháng hiện tại
+  function daysOf(month, until) {
+    const [y, mo] = month.split('-').map(Number);
+    const count = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    return Array.from({ length: count }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`).filter((d) => d <= until);
+  }
+
+  // Ô của bảng theo ngày: tổng R sau chi phí, dòng dưới là số lệnh chạm TP1 / số lệnh đã đóng
+  function dayCell(s, few, title) {
+    if (s.coverage === 'none') return el('td', { class: 'muted', title: 'Nguồn dữ liệu chưa có lịch sử tới tháng này' }, '—');
+    const closed = s.wins + s.losses + s.expired;
+    if (closed === 0) {
+      return el('td', { title }, el('div', { class: 'mx-value muted' }, '—'), el('div', { class: 'mx-meta' }, s.open ? `${s.open} đang mở` : 'không có lệnh'));
+    }
+    return el('td', { title },
+      el('div', { class: `mx-value ${closed >= few ? signClass(s.totalNet) : 'muted'}` }, fmtTotalR(s.totalNet)),
+      el('div', { class: 'mx-meta' }, `TP1 ${s.wins}/${closed}${s.open ? ` · ${s.open} mở` : ''}`));
+  }
+
+  // Một lệnh trong chú thích ô: giờ vào, chiều, phương pháp (cột có nhiều phương pháp), kết quả và R sau chi phí
+  function tradeLine(t, kind) {
+    const by = kind === 'total' ? ` ${t.strategy} ${t.timeframe}` : kind === 'combined' ? ` ${t.strategy}` : '';
+    return `${clockFmt.format(new Date(t.time))} ${ACTION_LABELS[t.action] || t.action}${by} → ` +
+      (t.open ? `đang mở (tạm tính ${fmtR(t.net)})` : `${OUTCOME_LABELS[t.outcome] || t.outcome} ${fmtR(t.net)}`);
+  }
+
+  function dailyCell(row, day) {
+    if (day < vnDayKey(row.from)) return el('td', { class: 'muted', title: 'Nguồn dữ liệu chưa có lịch sử tới ngày này' }, '—');
+    const s = row.days[day];
+    if (!s) return el('td', { class: 'muted' }, '·');
+    // Lãi/lỗ của một ngày là kết quả đã xảy ra chứ không phải kết luận về lợi thế nên luôn tô màu
+    return dayCell(s, 1, s.list.map((t) => tradeLine(t, row.kind)).join('\n'));
+  }
+
+  function monthTotalCell(s) {
+    const enough = s.wins + s.losses + s.expired >= FEW_TRADES.month;
+    return dayCell(s, FEW_TRADES.month, [
+      `Thắng ${fmtPct(s.winRate)} · R/lệnh ${fmtR(s.avgNet)}${s.profitFactor != null ? ` · PF ${s.profitFactor}` : ''}`,
+      enough ? null : `Dưới ${FEW_TRADES.month} lệnh, chưa đủ để kết luận`,
+    ].filter(Boolean).join('\n'));
+  }
+
+  // Số ngày tổng R dương / âm trong tháng, kèm ngày tốt nhất và tệ nhất
+  function dayCountCell(row, days) {
+    const list = days.map((d) => [d, row.days[d]]).filter(([, s]) => s && s.trades > s.open);
+    if (list.length === 0) return el('td', {}, el('div', { class: 'mx-value muted' }, '—'));
+    const best = list.reduce((a, b) => (b[1].totalNet > a[1].totalNet ? b : a));
+    const worst = list.reduce((a, b) => (b[1].totalNet < a[1].totalNet ? b : a));
+    return el('td', { title: `Tốt nhất ${fmtDay(best[0])}: ${fmtTotalR(best[1].totalNet)}\nTệ nhất ${fmtDay(worst[0])}: ${fmtTotalR(worst[1].totalNet)}` },
+      el('div', { class: 'mx-value' }, `${list.filter(([, s]) => s.totalNet > 0).length} / ${list.filter(([, s]) => s.totalNet < 0).length}`),
+      el('div', { class: 'mx-meta' }, `${list.length} ngày có lệnh`));
+  }
+
+  function monthSelect(months) {
+    const select = el('select', { 'aria-label': 'Chọn tháng' },
+      ...months.map((k) => el('option', { value: k }, `Tháng ${Number(k.slice(5))}/${k.slice(0, 4)}`)));
+    select.value = state.btDayMonth;
+    select.addEventListener('change', () => { state.btDayMonth = select.value; renderDaily(); });
+    return select;
+  }
+
+  function renderDaily() {
+    const host = $('#bt-daily');
+    const m = state.backtest && state.backtest.monthly;
+    if (!m) {
+      host.replaceChildren();
+      return;
+    }
+    if (!m.months.includes(state.btDayMonth)) state.btDayMonth = m.months[m.months.length - 1];
+    const month = state.btDayMonth;
+    const days = daysOf(month, vnDayKey(m.generatedAt));
+
+    host.replaceChildren(...m.results.filter((res) => res.rows && res.rows.length > 0).map((res) => {
+      const head = el('div', { class: 'card-head' },
+        el('div', {},
+          el('h2', {}, `${res.displayName || res.symbol}: theo ngày`),
+          el('p', { class: 'note' }, `Phương pháp đang bật · ngày theo giờ VN của thời điểm vào lệnh · ${res.cost}`)),
+        monthSelect(m.months));
+      // Báo cáo tạo trước khi có thống kê theo ngày
+      if (!res.rows.every((row) => row.days)) {
+        return el('section', { class: 'card' }, head, el('div', { class: 'empty' },
+          'Báo cáo hiện tại chưa có số liệu theo ngày. Bot sẽ bổ sung ở lần tạo báo cáo kế tiếp, hoặc chạy "npm run backtest:monthly" trên server.'));
+      }
+
+      // Mỗi khung một cột theo quy trình bot (dòng gộp, hoặc phương pháp duy nhất của khung) và cột toàn bot
+      const cols = res.rows.filter((row) => row.kind !== 'strategy' || !res.rows.some((r) => r.kind === 'combined' && r.timeframe === row.timeframe));
+      const thead = el('tr', {},
+        el('th', {}, 'Ngày'),
+        ...cols.map((row) => el('th', {}, row.timeframe || row.label, el('div', { class: 'mx-meta' }, row.timeframe ? row.label : 'mọi khung'))));
+      const body = days.map((d) => {
+        // Bấm vào ngày để xem chi tiết từng tín hiệu (entry, SL, TP1) ở mục Kiểm tra tín hiệu theo ngày
+        const open = el('button', { type: 'button', class: 'link-button', title: 'Kiểm tra chi tiết tín hiệu của ngày này' }, fmtDay(d));
+        open.addEventListener('click', () => {
+          runDayCheck(d);
+          $('#bt-daycheck').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        return el('tr', {},
+          el('td', { class: `name-cell${cols.some((row) => row.days[d]) ? '' : ' muted'}` }, open),
+          ...cols.map((row) => dailyCell(row, d)));
+      });
+      body.push(
+        el('tr', { class: 'total' }, el('td', { class: 'name-cell' }, 'Cả tháng'), ...cols.map((row) => monthTotalCell(row.months[month]))),
+        el('tr', {},
+          el('td', { class: 'name-cell', title: 'Số ngày tổng R dương / âm, chỉ tính lệnh đã đóng' }, 'Ngày lãi / lỗ'),
+          ...cols.map((row) => dayCountCell(row, days))));
+
+      return el('section', { class: 'card' }, head,
+        el('div', { class: 'table-wrap' }, el('table', { class: 'matrix' }, el('thead', {}, thead), el('tbody', {}, body))),
+        el('p', { class: 'note' },
+          'Mỗi dòng là một ngày; mỗi khung một cột theo đúng quy trình bot (các phương pháp của khung chạy gộp) và cột toàn bot. ' +
+          'Ô: tổng R sau chi phí, dòng dưới là số lệnh chạm TP1 / số lệnh đã đóng; xanh/đỏ là ngày lãi/lỗ, "·" là ngày không có lệnh. ' +
+          'Rê chuột vào ô để xem từng lệnh: giờ vào, chiều, phương pháp, kết quả và R; bấm vào ngày để kiểm tra chi tiết (entry, SL, TP1). ' +
+          'Mỗi ngày chỉ vài lệnh nên kết quả ngày dao động mạnh: dùng để soi lại từng ngày, còn đánh giá phương pháp thì xem theo tháng và cả năm.'));
+    }));
+  }
+
+  // ---------- Kiểm tra tín hiệu theo ngày ----------
+  const DAY_CHECK_URL = withToken('api/backtest/day');
+  const fmtFullDay = (day) => `${fmtDay(day)}/${day.slice(0, 4)}`;
+
+  async function runDayCheck(day) {
+    state.dayCheck = { day, loading: true };
+    renderDayCheck();
+    let next;
+    try {
+      const res = await fetch(`${DAY_CHECK_URL}${token ? '&' : '?'}date=${day}`, { cache: 'no-store' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || (res.status === 401 ? 'Sai hoặc thiếu token truy cập' : `HTTP ${res.status}`));
+      next = { day, result: body };
+    } catch (err) {
+      next = { day, error: err.message };
+    }
+    // Bỏ kết quả về muộn nếu đã chọn kiểm tra ngày khác
+    if (state.dayCheck.day !== day) return;
+    state.dayCheck = next;
+    renderDayCheck();
+  }
+
+  function renderDayResult(res) {
+    const name = res.displayName || res.symbol;
+    if (res.error) return [el('h3', {}, name), el('div', { class: 'empty' }, res.error)];
+    const ok = res.timeframes.filter((t) => !t.error);
+    const errors = res.timeframes.filter((t) => t.error);
+    const byTime = (a, b) => Date.parse(a.time) - Date.parse(b.time);
+    const withTf = (key) => ok.flatMap((t) => t[key].map((s) => ({ ...s, timeframe: t.timeframe }))).sort(byTime);
+    const signals = withTf('signals');
+    const skipped = withTf('skipped');
+    // Giờ trong ngày đang xem, kèm ngày nếu sang ngày khác
+    const when = (iso) => (vnDayKey(iso) === res.day ? clockFmt.format(new Date(iso)) : fmtTime(iso));
+    const actionCell = (a) => el('td', {}, a === 'BUY' ? '▲ MUA' : '▼ BÁN');
+    const statusOf = (key) => {
+      const st = STATUS[key];
+      return el('span', { class: `status ${st.cls}` }, el('i', { 'aria-hidden': 'true' }, st.icon), st.label);
+    };
+    const table = (heads, rows) => el('div', { class: 'table-wrap' }, el('table', {},
+      el('thead', {}, el('tr', {}, ...heads.map(([h, cls]) => el('th', { class: cls || null }, h)))),
+      el('tbody', {}, rows)));
+
+    const bySource = new Map();
+    for (const t of ok) bySource.set(t.source, [...(bySource.get(t.source) || []), t.timeframe]);
+    const dataTo = ok.length ? Math.max(...ok.map((t) => Date.parse(t.dataTo))) : null;
+    const blocks = [
+      el('h3', {}, `${name} · ${fmtFullDay(res.day)}`),
+      el('p', { class: 'bt-info' },
+        `Nến đã đóng trong ngày: ${ok.map((t) => `${t.timeframe} ${t.candles}`).join(' · ')}. `,
+        `Nguồn: ${[...bySource].map(([source, tfs]) => `${tfs.join(', ')} ${source}`).join('; ')}`,
+        dataTo ? `; dữ liệu tới ${fmtTime(dataTo)}.` : '.',
+        errors.length ? ` Lỗi: ${errors.map((t) => `${t.timeframe}: ${t.error}`).join(' · ')}` : null),
+    ];
+
+    if (signals.length === 0) {
+      blocks.push(el('div', { class: 'empty' }, ok.length && ok.every((t) => t.candles === 0)
+        ? 'Không có nến nào đóng trong ngày (thị trường nghỉ hoặc chưa tới giờ), nên không có tín hiệu.'
+        : 'Bot không có tín hiệu nào trong ngày.'));
+    } else {
+      const closed = signals.filter((s) => !s.open);
+      const count = (outcome) => closed.filter((s) => s.outcome === outcome).length;
+      const total = closed.reduce((a, s) => a + s.net, 0);
+      blocks.push(
+        el('p', { class: 'sub-head' },
+          `Bot phát ${signals.length} tín hiệu: ${count('TP')} chạm TP1 · ${count('SL')} chạm SL` +
+          `${count('EXPIRED') ? ` · ${count('EXPIRED')} hết hạn` : ''}${signals.length - closed.length ? ` · ${signals.length - closed.length} đang mở` : ''}` +
+          (closed.length ? ` · tổng ${fmtTotalR(total)} sau chi phí` : '')),
+        table(
+          [['Giờ vào'], ['Khung'], ['Phương pháp'], ['Chiều'], ['Điểm', 'num'], ['Entry', 'num'], ['SL', 'num'], ['TP1', 'num'], ['Kết quả'], ['R', 'num']],
+          signals.map((s) => el('tr', {},
+            el('td', {}, when(s.time)),
+            el('td', {}, s.timeframe),
+            el('td', { class: 'name-cell' }, s.strategy, s.allies.length ? el('span', { class: 'tag' }, `+ ${s.allies.join(', ')}`) : null),
+            actionCell(s.action),
+            el('td', { class: 'num' }, s.score),
+            el('td', { class: 'num' }, fmtPrice(s.entry)),
+            el('td', { class: 'num' }, fmtPrice(s.stopLoss)),
+            el('td', { class: 'num' }, fmtPrice(s.takeProfit)),
+            el('td', {}, statusOf(s.open ? 'OPEN' : s.outcome), el('span', { class: 'tag' }, s.open ? 'tạm tính' : `nến ${when(s.exitTime)}`)),
+            el('td', { class: `num ${s.open ? 'muted' : signClass(s.net)}`, title: s.open ? 'Tạm tính theo giá đóng cửa nến gần nhất, chưa trừ chi phí' : 'Sau chi phí' },
+              fmtR(s.open ? s.r : s.net))))));
+    }
+
+    if (skipped.length > 0) {
+      blocks.push(
+        el('p', { class: 'sub-head' }, 'Phương pháp có tín hiệu riêng nhưng bot không phát:'),
+        table([['Giờ vào'], ['Khung'], ['Phương pháp'], ['Chiều'], ['Điểm', 'num'], ['Lý do']],
+          skipped.map((s) => el('tr', {},
+            el('td', {}, when(s.time)), el('td', {}, s.timeframe), el('td', { class: 'name-cell' }, s.strategy),
+            actionCell(s.action), el('td', { class: 'num' }, s.score), el('td', {}, s.reason)))));
+    }
+
+    blocks.push(res.live.length === 0
+      ? el('p', { class: 'sub-head' }, 'Bot thật không ghi nhận tín hiệu nào trong ngày.')
+      : [
+        el('p', { class: 'sub-head' }, `Bot thật đã ghi nhận ${res.live.length} tín hiệu trong ngày:`),
+        table([['Giờ vào'], ['Khung'], ['Phương pháp'], ['Chiều'], ['Điểm', 'num'], ['Entry', 'num'], ['Gửi'], ['Kết quả'], ['R', 'num']],
+          res.live.map((s) => el('tr', {},
+            el('td', {}, when(s.time)), el('td', {}, s.timeframe), el('td', { class: 'name-cell' }, s.strategy),
+            actionCell(s.action), el('td', { class: 'num' }, s.score), el('td', { class: 'num' }, fmtPrice(s.entry)),
+            el('td', {}, s.sent ? 'Đã gửi' : el('span', { class: 'muted' }, 'AI từ chối')),
+            el('td', {}, STATUS[s.status] ? statusOf(s.status) : s.status),
+            el('td', { class: `num ${signClass(s.r)}` }, fmtR(s.r))))),
+      ]);
+    return blocks.flat();
+  }
+
+  function renderDayCheck() {
+    const dc = state.dayCheck;
+    const today = vnDayKey(Date.now());
+    const input = el('input', { type: 'date', value: dc.day || today, max: today, 'aria-label': 'Ngày cần kiểm tra' });
+    const button = el('button', { type: 'button', class: 'btn' }, dc.loading ? 'Đang kiểm tra…' : 'Kiểm tra');
+    button.disabled = !!dc.loading;
+    const run = () => {
+      if (input.value && input.value <= today) runDayCheck(input.value);
+    };
+    button.addEventListener('click', run);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+
+    let body = null;
+    if (dc.loading) body = el('div', { class: 'empty' }, `Đang chạy các phương pháp cho ngày ${fmtFullDay(dc.day)}… (tải dữ liệu mất khoảng 10–20 giây)`);
+    else if (dc.error) body = el('div', { class: 'empty' }, `Không kiểm tra được: ${dc.error}`);
+    else if (dc.result) body = dc.result.results.flatMap(renderDayResult);
+
+    $('#bt-daycheck').replaceChildren(el('section', { class: 'card' },
+      el('div', { class: 'card-head' },
+        el('div', {},
+          el('h2', {}, 'Kiểm tra tín hiệu theo ngày'),
+          el('p', { class: 'note' }, 'Chạy các phương pháp đang bật cho một ngày (giờ VN) theo đúng quy trình bot trên dữ liệu mới nhất, ' +
+            'kèm kết quả từng lệnh tới hiện tại và tín hiệu bot thật đã ghi nhận. Chưa gồm bộ lọc AI và chặn tin tức.')),
+        el('div', { class: 'controls' }, input, button)),
+      body,
+      dc.result ? el('p', { class: 'footnote' },
+        'Giờ vào = giờ đóng nến tín hiệu. Kết quả: nến chạm TP1 hoặc SL (cùng nến chạm cả hai tính SL), hết hạn sau ' +
+        `${(state.backtest && state.backtest.monthly && state.backtest.monthly.horizonBars) || 48} nến thì chốt theo giá đóng cửa. ` +
+        'R sau chi phí, lệnh đang mở tạm tính theo giá gần nhất. Ngày gần đây dùng dữ liệu TradingView như bot thật nên có thể khác bảng theo ngày (khung 15m của bảng lấy dữ liệu Binance).') : null));
+  }
+
   // ---------- Lịch tin tức ----------
   const newsTimeFmt = new Intl.DateTimeFormat('vi-VN', {
     timeZone: 'Asia/Ho_Chi_Minh', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -1243,7 +1523,9 @@
 
   async function load() {
     document.body.classList.add('loading');
-    const [signals, news, backtest] = await Promise.allSettled([fetchJson(API_URL), fetchJson(NEWS_URL), fetchJson(BACKTEST_URL)]);
+    // Báo cáo backtest khá nặng (có danh sách lệnh từng ngày) và chỉ đổi hằng tuần: sau lần đầu chỉ tải lại khi đang xem tab báo cáo
+    const wantBacktest = !state.backtest || state.view === 'backtest';
+    const [signals, news, backtest] = await Promise.allSettled([fetchJson(API_URL), fetchJson(NEWS_URL), wantBacktest ? fetchJson(BACKTEST_URL) : null]);
     if (signals.status === 'fulfilled') {
       state.data = signals.value;
       $('#error').hidden = true;
@@ -1256,10 +1538,11 @@
     }
     if (news.status === 'fulfilled') state.news = news.value;
     renderNews();
-    if (backtest.status === 'fulfilled') {
+    if (backtest.status === 'fulfilled' && backtest.value) {
       state.backtest = backtest.value;
       renderBacktest();
       renderMonthly();
+      renderDaily();
     }
     document.body.classList.remove('loading');
   }
@@ -1272,6 +1555,7 @@
 
   bindControls();
   renderView();
+  renderDayCheck();
   load();
   setInterval(load, REFRESH_MS);
 })();
