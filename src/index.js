@@ -4,7 +4,7 @@ const CONFIG = require('./config');
 const { scanMarket, runMarketBriefing, strategyPlan } = require('./botEngine');
 const { registerDashboard } = require('./dashboard/server');
 const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
-const { startReportJob, reportAgeMs } = require('./backtest/reportJob');
+const { startReportJob, staleReports } = require('./backtest/reportJob');
 
 function logNewsError(err) {
   console.error('❌ [News] Lỗi lịch tin tức:', err.message);
@@ -81,9 +81,11 @@ async function startBot() {
     scanMarket();
   });
 
-  // Báo cáo backtest cho dashboard: tạo ngay nếu chưa có hoặc đã cũ hơn 7 ngày, sau đó chạy định kỳ
+  // Báo cáo backtest cho dashboard: tạo ngay báo cáo nào chưa có, cũ hơn 7 ngày hoặc được tạo theo cấu hình
+  // STRATEGIES khác hiện tại (chỉ chạy lại đúng báo cáo đó), sau đó chạy định kỳ
   if (CONFIG.backtestReportEnabled) {
-    if (reportAgeMs() > 7 * 24 * 3600 * 1000) startReportJob('chưa có báo cáo hoặc báo cáo đã cũ');
+    const stale = staleReports(7 * 24 * 3600 * 1000);
+    if (stale.length > 0) startReportJob('chưa có báo cáo, báo cáo đã cũ hoặc cấu hình phương pháp đã đổi', stale);
     cron.schedule(CONFIG.backtestReportCron, () => startReportJob('lịch định kỳ'));
   }
 

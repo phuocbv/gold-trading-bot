@@ -7,15 +7,15 @@
  */
 const CONFIG = require('../src/config');
 const { fetchTradingViewHistory, resolveSymbolSources, getClosedCandles, CANDLE_LIMIT } = require('../src/services/marketData');
-const { registry, getStrategyPlan } = require('../src/strategies');
-const { runBacktest, summarize, randomControl, passes, PASS_CRITERIA, DEFAULT_BARS, costLabel } = require('../src/backtest/engine');
+const { registry, getStrategyPlan, planSignature } = require('../src/strategies');
+const { runBacktest, summarize, randomControl, passes, tradeLog, PASS_CRITERIA, DEFAULT_BARS, REPORT_VERSION, TRADE_LOG_FIELDS, costLabel } = require('../src/backtest/engine');
 const { primaryStrategyName } = require('../src/tradeOutcome');
 const { writeJson } = require('../src/services/jsonStore');
 
 function evaluate(symbol, candles, timeframe, trades, split, warmup) {
   const summary = summarize(trades, split);
   const control = randomControl({ symbol, candles, timeframe, count: summary.trades, realAvgNet: summary.avgNet, warmup });
-  return { ...summary, p: control.p, randomAvgNet: control.randomAvgNet, pass: passes(summary, control.p) };
+  return { ...summary, p: control.p, randomAvgNet: control.randomAvgNet, pass: passes(summary, control.p), log: tradeLog(trades, timeframe) };
 }
 
 async function reportFor(symbol, timeframe, plan) {
@@ -79,7 +79,10 @@ async function main() {
   }
 
   writeJson(CONFIG.backtestReportPath, {
+    version: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
+    planSignature: planSignature(plan),
+    tradeLogFields: TRADE_LOG_FIELDS,
     durationSec: Math.round((Date.now() - started) / 1000),
     criteria: PASS_CRITERIA,
     horizonBars: CONFIG.signalTrackHorizonBars,

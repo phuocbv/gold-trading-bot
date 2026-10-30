@@ -13,7 +13,7 @@
  * (Vàng: hợp đồng XAUUSDT Binance Futures, lọc theo giờ giao dịch OANDA). Chưa gồm bộ lọc AI và chặn tin tức.
  */
 const CONFIG = require('../src/config');
-const { getStrategyPlan } = require('../src/strategies');
+const { getStrategyPlan, planSignature } = require('../src/strategies');
 const { dayKey, monthsOf, monthlyReportFor } = require('../src/backtest/monthly');
 const { CANDLE_LIMIT } = require('../src/services/marketData');
 const { writeJson } = require('../src/services/jsonStore');
@@ -21,10 +21,21 @@ const { writeJson } = require('../src/services/jsonStore');
 function parseArgs(argv) {
   const args = { symbols: [], year: Number(dayKey(Date.now()).slice(0, 4)), days: null };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--year') args.year = parseInt(argv[++i], 10);
     // --days [tháng 1-12]: in thêm bảng theo ngày của tháng đó, không ghi tháng thì lấy tháng gần nhất (0)
-    else if (argv[i] === '--days') args.days = /^\d{1,2}$/.test(argv[i + 1] || '') ? Number(argv[++i]) : 0;
-    else args.symbols.push(argv[i]);
+    if (argv[i] === '--days') {
+      args.days = /^\d{1,2}$/.test(argv[i + 1] || '') ? Number(argv[++i]) : 0;
+      continue;
+    }
+    const year = argv[i] === '--year' ? argv[++i] : /^\d{4}$/.test(argv[i]) ? argv[i] : null;
+    if (year === null) {
+      args.symbols.push(argv[i]);
+      continue;
+    }
+    if (!/^\d{4}$/.test(year || '')) {
+      console.error(`❌ [BacktestMonthly] Năm không hợp lệ: "${year ?? ''}" (vd: --year 2026)`);
+      process.exit(1);
+    }
+    args.year = Number(year);
   }
   if (args.symbols.length === 0) args.symbols = CONFIG.symbols;
   return args;
@@ -123,6 +134,7 @@ async function main() {
 
   writeJson(CONFIG.backtestMonthlyPath, {
     generatedAt: new Date().toISOString(),
+    planSignature: planSignature(plan),
     durationSec: Math.round((Date.now() - started) / 1000),
     year: args.year,
     months,

@@ -68,7 +68,7 @@ async function loadCandles(symbol, timeframe, since, fetchTv) {
       if (firstEntry(alt.candles, timeframe) < firstEntry(tv, timeframe)) return { ...alt, fallback: true };
     }
   } catch (err) {
-    console.warn(`⚠️ [Backtest] ${symbol} ${timeframe}: không tải được dữ liệu Binance (${err.message}), dùng TradingView.`);
+    console.warn(`⚠️ [Backtest] ${symbol} ${timeframe}: không tải được dữ liệu Binance thay thế (${err.message}), dùng TradingView.`);
   }
   return primary;
 }
@@ -83,8 +83,15 @@ function stats(trades) {
     const list = closed.filter((t) => t.outcome === outcome);
     return list.length ? list.reduce((a, t) => a + t.net, 0) / list.length : null;
   };
+  // Tỉ lệ thắng hòa vốn (theo cùng định nghĩa thắng% = TP / (TP + SL)), tính cả phần lãi/lỗ của lệnh hết hạn:
+  // n·w·R_thắng + n·(1 - w)·R_thua + tổng R hết hạn = 0
   const win = avgNet('TP');
   const loss = avgNet('SL');
+  const decided = s.wins + s.losses;
+  const expiredNet = closed.filter((t) => t.outcome === 'EXPIRED').reduce((a, t) => a + t.net, 0);
+  const breakEven = decided > 0 && win > 0 && loss < 0
+    ? Math.min(1, Math.max(0, (-loss - expiredNet / decided) / (win - loss)))
+    : null;
   return {
     trades: trades.length,
     wins: s.wins,
@@ -95,8 +102,7 @@ function stats(trades) {
     avgNet: s.avgNet,
     totalNet: s.totalNet,
     profitFactor: s.profitFactor,
-    // Tỉ lệ thắng hòa vốn theo R thắng/thua trung bình thực tế (đã trừ chi phí)
-    breakEven: win > 0 && loss < 0 ? +(-loss / (win - loss)).toFixed(4) : null,
+    breakEven: breakEven == null ? null : +breakEven.toFixed(4),
   };
 }
 
@@ -122,17 +128,20 @@ function byDay(trades) {
 
 /**
  * Một dòng của bảng: thống kê cả năm, từng tháng và từng ngày có lệnh. coverage của tháng: 'none' (chưa có dữ liệu),
- * 'partial' (dữ liệu bắt đầu giữa tháng) hoặc 'full'
+ * 'partial' (dữ liệu bắt đầu giữa tháng, hoặc với dòng Toàn bot: chỉ một số khung có dữ liệu) hoặc 'full'
+ * @param {number|Array<number>} from - Thời điểm vào lệnh đầu tiên có dữ liệu (dòng Toàn bot: của từng khung)
  */
 function buildRow(row, trades, months, from) {
-  const fromMonth = monthKey(from);
+  const froms = [].concat(from);
+  const firstMonth = monthKey(Math.min(...froms));
+  const lastMonth = monthKey(Math.max(...froms));
   return {
     ...row,
-    from: new Date(from).toISOString(),
+    from: new Date(Math.min(...froms)).toISOString(),
     year: stats(trades),
     months: Object.fromEntries(months.map((m) => [m, {
       ...stats(trades.filter((t) => t.month === m)),
-      coverage: m < fromMonth ? 'none' : m === fromMonth ? 'partial' : 'full',
+      coverage: m < firstMonth ? 'none' : m <= lastMonth ? 'partial' : 'full',
     }])),
     days: byDay(trades),
   };
@@ -149,7 +158,12 @@ async function monthlyReportFor(symbol, plan, year) {
   const months = monthsOf(year);
   const tvCache = new Map();
   const fetchTv = (tf) => {
-    if (!tvCache.has(tf)) tvCache.set(tf, fetchTradingViewHistory(sources.tradingViewSymbol, tf, DEFAULT_BARS[tf] || 6000));
+    if (!tvCache.has(tf)) {
+      const request = fetchTradingViewHistory(sources.tradingViewSymbol, tf, DEFAULT_BARS[tf] || 6000);
+      // Lỗi tạm thời không được giữ trong cache, để khung dùng lại dữ liệu này còn tải lại được
+      request.catch(() => tvCache.delete(tf));
+      tvCache.set(tf, request);
+    }
     return tvCache.get(tf);
   };
 
@@ -203,7 +217,10 @@ async function monthlyReportFor(symbol, plan, year) {
   }
 
   if (botFrom.length > 1) {
-    rows.push(buildRow({ kind: 'total', label: 'Toàn bot', timeframe: null }, botTrades, months, Math.max(...botFrom)));
+    // Khung nào không có dữ liệu từ đầu năm thì dòng Toàn bot chỉ gồm các khung còn lại ở những tháng đó
+    const missing = timeframes.filter((t) => t.error || monthKey(Date.parse(t.from)) >= `${year}-01`).map((t) => t.timeframe);
+    const label = missing.length ? `Toàn bot (thiếu dữ liệu đầu năm khung ${missing.join(', ')})` : 'Toàn bot';
+    rows.push(buildRow({ kind: 'total', label, timeframe: null }, botTrades, months, botFrom));
   }
   return { symbol, displayName: sources.displayName, cost: costLabel(symbol), timeframes, rows };
 }
