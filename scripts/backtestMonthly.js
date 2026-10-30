@@ -1,7 +1,7 @@
 /**
  * Backtest theo tháng và theo ngày của các phương pháp đang bật (STRATEGIES) trong một năm: thắng%, R sau chi phí
  * từng tháng, từng ngày. In bảng ra màn hình và ghi data/backtest-monthly.json cho dashboard
- * (tab Báo cáo backtest > Theo tháng, Theo ngày).
+ * (tab Báo cáo backtest > Theo tháng, Theo ngày); có DATABASE_URL thì lưu thêm vào Postgres, giữ được báo cáo của từng năm.
  *
  * Cách dùng:
  *   npm run backtest:monthly                         # năm hiện tại, các mã trong SYMBOLS
@@ -17,6 +17,7 @@ const { getStrategyPlan, planSignature } = require('../src/strategies');
 const { dayKey, monthsOf, monthlyReportFor } = require('../src/backtest/monthly');
 const { CANDLE_LIMIT } = require('../src/services/marketData');
 const { writeJson } = require('../src/services/jsonStore');
+const { saveRunAndClose } = require('../src/backtest/store');
 
 function parseArgs(argv) {
   const args = { symbols: [], year: Number(dayKey(Date.now()).slice(0, 4)), days: null };
@@ -132,7 +133,7 @@ async function main() {
     process.exit(1);
   }
 
-  writeJson(CONFIG.backtestMonthlyPath, {
+  const report = {
     generatedAt: new Date().toISOString(),
     planSignature: planSignature(plan),
     durationSec: Math.round((Date.now() - started) / 1000),
@@ -142,8 +143,13 @@ async function main() {
     cooldownBars: CONFIG.signalCooldownBars,
     candleWindow: CANDLE_LIMIT,
     results,
-  });
-  console.log(`\n✅ [BacktestMonthly] Đã ghi ${CONFIG.backtestMonthlyPath} (${Math.round((Date.now() - started) / 1000)}s)`);
+  };
+  const stored = await saveRunAndClose('monthly', report);
+  // File JSON chỉ giữ báo cáo năm hiện tại (dashboard dùng khi không có Postgres); năm khác đã lưu vào Postgres thì không ghi đè
+  if (!stored || args.year === Number(dayKey(Date.now()).slice(0, 4))) {
+    writeJson(CONFIG.backtestMonthlyPath, report);
+    console.log(`\n✅ [BacktestMonthly] Đã ghi ${CONFIG.backtestMonthlyPath} (${Math.round((Date.now() - started) / 1000)}s)`);
+  }
   console.log('Lưu ý: thắng% = TP1 / (TP1 + SL); "hòa vốn%" là thắng% tối thiểu để không lỗ với R thắng/thua thực tế; tháng và ngày theo giờ VN. Kết quả quá khứ không đảm bảo tương lai.');
   process.exit(0);
 }

@@ -2,8 +2,9 @@ const CONFIG = require('../config');
 const { checkCandleHit, rMultiple, primaryStrategyName } = require('../tradeOutcome');
 const { resolveSymbolSources, timeframeToMs } = require('./marketData');
 const { readJson, writeJson } = require('./jsonStore');
+const { dbEnabled, query, withTransaction } = require('./db');
 
-// Danh sách tín hiệu đã ghi nhận, đọc từ file JSON ở lần dùng đầu tiên
+// Danh sách tín hiệu đã ghi nhận, đọc từ file JSON ở lần dùng đầu tiên (có Postgres thì gộp thêm khi khởi động)
 let records = null;
 
 function load() {
@@ -24,8 +25,111 @@ function feedKey(source) {
   return /^binance/i.test(source || '') && !ticker.includes(':') ? `BINANCE:${ticker}` : ticker;
 }
 
-function save() {
+// Có Postgres: mỗi thay đổi được ghi vào cả file JSON và Postgres. Bản ghi chưa lưu được vào Postgres (vd: mất kết nối)
+// nằm ở pendingIds để thử lại ở lần cập nhật sau; lần đầu kết nối được thì gộp dữ liệu hai bên trước (dbSynced)
+const pendingIds = new Set();
+let dbSynced = false;
+let dbFailing = false;
+let dbQueue = Promise.resolve();
+let dbQueued = false;
+
+// Mức tiến triển của một bản ghi để chọn bản mới hơn khi gộp: đã đóng lệnh > số nến đã theo dõi > đã gửi
+function progress(rec) {
+  return [rec.status !== 'OPEN' ? 1 : 0, rec.barsHeld || 0, rec.sent ? 1 : 0, rec.delivered ? 1 : 0];
+}
+
+function compareProgress(a, b) {
+  const pa = progress(a);
+  const pb = progress(b);
+  const i = pa.findIndex((v, k) => v !== pb[k]);
+  return i < 0 ? 0 : pa[i] - pb[i];
+}
+
+async function upsertSignals(list) {
+  await withTransaction(async (client) => {
+    for (const rec of list) {
+      await client.query(
+        `INSERT INTO signals (id, symbol, timeframe, strategy, action, sent, status, candle_time, closed_time, r_multiple, data, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+         ON CONFLICT (id) DO UPDATE SET symbol = EXCLUDED.symbol, timeframe = EXCLUDED.timeframe, strategy = EXCLUDED.strategy,
+           action = EXCLUDED.action, sent = EXCLUDED.sent, status = EXCLUDED.status, candle_time = EXCLUDED.candle_time,
+           closed_time = EXCLUDED.closed_time, r_multiple = EXCLUDED.r_multiple, data = EXCLUDED.data, updated_at = now()`,
+        [rec.id, rec.symbol, rec.timeframe || CONFIG.timeframe, rec.strategy, rec.action, Boolean(rec.sent), rec.status,
+          rec.candleTime, rec.closedTime, rec.status === 'OPEN' ? null : rMultiple(rec, rec.exitPrice), rec]);
+    }
+  });
+}
+
+/**
+ * Gộp tín hiệu trong Postgres với file JSON: bản ghi chỉ có ở một bên được bổ sung sang bên kia, bản ghi có ở cả hai
+ * giữ bản tiến triển hơn (vd: file đã có kết quả lệnh nhưng bot dừng trước khi kịp lưu vào Postgres)
+ */
+async function syncWithDb() {
+  load();
+  const { rows } = await query('SELECT data FROM signals');
+  const fromDb = new Map(rows.map((r) => [r.data.id, r.data]));
+  const merged = new Map(records.map((r) => [r.id, r]));
+  let fileChanged = false;
+  for (const [id, rec] of fromDb) {
+    if (!merged.has(id) || compareProgress(rec, merged.get(id)) > 0) {
+      merged.set(id, rec);
+      fileChanged = true;
+    }
+  }
+  for (const [id, rec] of merged) {
+    if (!fromDb.has(id) || compareProgress(rec, fromDb.get(id)) > 0) pendingIds.add(id);
+  }
+  records = [...merged.values()].sort((a, b) => Date.parse(a.candleTime) - Date.parse(b.candleTime));
+  if (fileChanged) writeJson(CONFIG.signalDbPath, records);
+  dbSynced = true;
+  console.log(`🗄️ [SignalTracker] Đã đồng bộ ${records.length} tín hiệu với Postgres (${pendingIds.size} bản ghi cần lưu thêm).`);
+}
+
+/**
+ * Lưu các bản ghi đang chờ vào Postgres, lần lượt và không chặn bot; lỗi thì giữ lại để thử ở lần sau
+ */
+function persistToDb() {
+  if (!dbEnabled() || dbQueued) return dbQueue;
+  dbQueued = true;
+  dbQueue = dbQueue.then(async () => {
+    dbQueued = false;
+    let ids = [];
+    try {
+      if (!dbSynced) await syncWithDb();
+      ids = [...pendingIds];
+      pendingIds.clear();
+      if (ids.length > 0) await upsertSignals(records.filter((r) => ids.includes(r.id)));
+      if (dbFailing) console.log('🗄️ [SignalTracker] Đã kết nối lại Postgres và lưu các tín hiệu còn chờ.');
+      dbFailing = false;
+    } catch (err) {
+      ids.forEach((id) => pendingIds.add(id));
+      // Chỉ báo lỗi một lần cho mỗi đợt mất kết nối để không làm ngập log
+      if (!dbFailing) console.error(`❌ [SignalTracker] Chưa lưu được tín hiệu vào Postgres (${err.message}), sẽ thử lại ở lần cập nhật sau.`);
+      dbFailing = true;
+    }
+  });
+  return dbQueue;
+}
+
+function save(changed) {
   writeJson(CONFIG.signalDbPath, records);
+  for (const rec of changed) pendingIds.add(rec.id);
+  persistToDb();
+}
+
+/**
+ * Nạp tín hiệu đã lưu trước lượt quét đầu tiên: có Postgres thì gộp với file JSON (lỗi kết nối thì dùng file và thử lại sau)
+ */
+async function initSignalStore() {
+  load();
+  await persistToDb();
+}
+
+/**
+ * Chờ lưu xong các thay đổi vào Postgres (dùng trước khi tắt bot)
+ */
+function flushSignals() {
+  return pendingIds.size > 0 ? persistToDb() : dbQueue;
 }
 
 /**
@@ -47,13 +151,13 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
         aiMode: ai ? ai.mode : null,
         aiConfidence: ai ? ai.confidence : null,
       });
-      save();
+      save([existing]);
     }
     return;
   }
 
   const signalTime = new Date(candleTime).toISOString();
-  records.push({
+  const rec = {
     id,
     symbol: signal.symbol,
     displayName: signal.displayName || signal.symbol,
@@ -78,8 +182,9 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
     lastPrice: signal.entry,
     exitPrice: null,
     closedTime: null,
-  });
-  save();
+  };
+  records.push(rec);
+  save([rec]);
 }
 
 /**
@@ -94,7 +199,7 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
  */
 function updateOpenSignals(symbol, candles, { source, isFallback = true, timeframe = CONFIG.timeframe, now = Date.now() } = {}) {
   load();
-  let changed = false;
+  const changed = new Set();
 
   for (const rec of records) {
     if (rec.symbol !== symbol || rec.status !== 'OPEN') continue;
@@ -104,13 +209,13 @@ function updateOpenSignals(symbol, candles, { source, isFallback = true, timefra
       // Tính từ lúc bắt đầu mất nguồn (không phải lần cập nhật cuối) để khoảng nghỉ cuối tuần không bị tính là mất nguồn
       if (!rec.feedMissingSince) {
         rec.feedMissingSince = new Date(now).toISOString();
-        changed = true;
+        changed.add(rec);
       }
       const horizonMs = CONFIG.signalTrackHorizonBars * timeframeToMs(rec.timeframe || CONFIG.timeframe);
       if (now - Date.parse(rec.feedMissingSince) <= horizonMs) continue;
     } else if (rec.feedMissingSince) {
       delete rec.feedMissingSince;
-      changed = true;
+      changed.add(rec);
     }
     const checkedUntil = new Date(rec.lastCheckedTime).getTime();
 
@@ -121,7 +226,7 @@ function updateOpenSignals(symbol, candles, { source, isFallback = true, timefra
       rec.barsHeld++;
       rec.lastCheckedTime = new Date(time).toISOString();
       rec.lastPrice = candle.close;
-      changed = true;
+      changed.add(rec);
 
       const hit = checkCandleHit(rec, candle);
       if (hit || rec.barsHeld >= CONFIG.signalTrackHorizonBars) {
@@ -135,7 +240,9 @@ function updateOpenSignals(symbol, candles, { source, isFallback = true, timefra
     }
   }
 
-  if (changed) save();
+  if (changed.size > 0) save(changed);
+  // Không có gì đổi nhưng còn bản ghi chưa lưu được vào Postgres: thử lại mỗi lượt quét
+  else if (pendingIds.size > 0 || (dbEnabled() && !dbSynced)) persistToDb();
 }
 
 /**
@@ -171,6 +278,8 @@ function listSignals() {
 }
 
 module.exports = {
+  initSignalStore,
+  flushSignals,
   recordSignal,
   updateOpenSignals,
   listSignals,

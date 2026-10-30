@@ -6,6 +6,8 @@ const { getStrategyPlan } = require('../strategies');
 const { primaryStrategyName } = require('../tradeOutcome');
 const { readJson } = require('../services/jsonStore');
 const { getReportJobStatus } = require('../backtest/reportJob');
+const { loadBacktest } = require('../backtest/store');
+const { dbEnabled } = require('../services/db');
 const { parseDay, daySignalsFor } = require('../backtest/daySignals');
 const { dayKey } = require('../backtest/monthly');
 
@@ -89,10 +91,27 @@ function registerDashboard(app) {
     res.json(getNewsOverview());
   });
 
-  app.get('/api/backtest', requireToken, (req, res) => {
+  // ?year=YYYY: báo cáo theo tháng của năm đó (chỉ có khi lưu Postgres; mặc định năm gần nhất)
+  app.get('/api/backtest', requireToken, async (req, res) => {
+    const year = /^\d{4}$/.test(String(req.query.year || '')) ? Number(req.query.year) : null;
+    let stored = null;
+    if (dbEnabled()) {
+      try {
+        stored = await loadBacktest(year);
+      } catch (err) {
+        console.error('❌ [Dashboard] Không đọc được báo cáo từ Postgres, dùng file JSON:', err.message);
+      }
+    }
+    // Postgres chưa có báo cáo (vd: vừa bật, chưa lưu bổ sung xong) hoặc lỗi kết nối thì đọc file JSON
+    const fileMonthly = () => {
+      const monthly = readReport(CONFIG.backtestMonthlyPath);
+      return monthly && (year == null || monthly.year === year) ? monthly : null;
+    };
     res.json({
-      report: readReport(CONFIG.backtestReportPath),
-      monthly: readReport(CONFIG.backtestMonthlyPath),
+      storage: stored && stored.report ? 'postgres' : 'file',
+      report: (stored && stored.report) || readReport(CONFIG.backtestReportPath),
+      monthly: (stored && stored.monthly) || fileMonthly(),
+      monthlyYears: stored ? stored.monthlyYears : [],
       job: getReportJobStatus(),
       // Phương pháp đang bật theo từng khung, để báo cáo đánh dấu đúng kể cả khi cấu hình đổi sau lần chạy báo cáo
       active: Object.fromEntries([...getStrategyPlan()].map(([tf, list]) => [tf, list.map((s) => s.key)])),

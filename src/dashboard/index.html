@@ -437,6 +437,7 @@
   const API_URL = withToken('api/signals');
   const NEWS_URL = withToken('api/news');
   const BACKTEST_URL = withToken('api/backtest');
+  const backtestUrl = () => BACKTEST_URL + (state.btYear ? `${token ? '&' : '?'}year=${state.btYear}` : '');
   const IMPACT_LABELS = { High: 'Mạnh', Medium: 'Trung bình', Low: 'Thấp' };
   const STATUS = {
     TP: { cls: 'tp', icon: '✓', label: 'Chạm TP1' },
@@ -452,6 +453,8 @@
     view: 'live',
     btTimeframe: null,
     btMetric: 'win',
+    // Năm của báo cáo theo tháng (null = năm gần nhất); chọn được năm cũ khi báo cáo lưu trong Postgres
+    btYear: null,
     // Tháng đang xem ở bảng theo ngày; mặc định tháng gần nhất của báo cáo
     btDayMonth: null,
     // Kiểm tra tín hiệu theo ngày: { day, loading, result, error }
@@ -1123,7 +1126,8 @@
     }
 
     const c = report.criteria;
-    $('#bt-note').textContent = `Tạo lúc ${fmtTime(report.generatedAt)} (mất ${report.durationSec} giây) · dữ liệu Vàng thật từ TradingView${running}`;
+    $('#bt-note').textContent = `Tạo lúc ${fmtTime(report.generatedAt)} (mất ${report.durationSec} giây) · dữ liệu Vàng thật từ TradingView` +
+      `${bt.storage === 'postgres' ? ' · lưu trong Postgres' : ''}${running}`;
     $('#bt-criteria').replaceChildren(
       el('p', { class: 'note' }, 'Một phương pháp "đạt chuẩn" khi thỏa cả 4 tiêu chí (đặt trước khi xem kết quả):'),
       el('ol', { class: 'criteria' },
@@ -1259,6 +1263,20 @@
       }));
   }
 
+  // Chọn năm của báo cáo theo tháng: tải lại báo cáo của năm đó từ server
+  function yearSelect(m) {
+    const years = state.backtest.monthlyYears || [];
+    if (years.length < 2) return null;
+    const select = el('select', { 'aria-label': 'Chọn năm' }, ...years.map((y) => el('option', { value: String(y) }, `Năm ${y}`)));
+    select.value = String(m.year);
+    select.addEventListener('change', () => {
+      state.btYear = Number(select.value) === years[0] ? null : Number(select.value);
+      select.disabled = true;
+      load();
+    });
+    return select;
+  }
+
   function renderMonthly() {
     const host = $('#bt-monthly');
     if (!state.backtest) return;
@@ -1290,8 +1308,9 @@
       for (const t of timeframes.filter((x) => !x.error)) bySource.set(t.source, [...(bySource.get(t.source) || []), t.timeframe]);
       const fallback = timeframes.filter((t) => t.fallback).map((t) => t.timeframe);
       const reportTfs = timeframes.map((t) => t.timeframe);
-      const planChanged = timeframes.some((t) => !sameKeys(t.keys, active[t.timeframe]))
-        || Object.keys(active).some((tf) => !reportTfs.includes(tf));
+      // Năm cũ giữ nguyên cấu hình lúc tạo, chỉ báo năm hiện tại sẽ được tạo lại theo cấu hình mới
+      const planChanged = m.year === Number(vnDayKey(Date.now()).slice(0, 4))
+        && (timeframes.some((t) => !sameKeys(t.keys, active[t.timeframe])) || Object.keys(active).some((tf) => !reportTfs.includes(tf)));
       const rowLabel = (row) => {
         const base = row.timeframe ? `${row.label} · ${row.timeframe}` : row.label;
         if (row.kind === 'strategy' && !(active[row.timeframe] || []).includes(row.key)) return `${base} (đã tắt)`;
@@ -1315,7 +1334,7 @@
           el('div', {},
             el('h2', {}, `${name}: theo tháng ${m.year}`),
             el('p', { class: 'note' }, `Phương pháp bật lúc tạo báo cáo · tạo lúc ${fmtTime(m.generatedAt)} · tháng theo giờ VN · ${res.cost}`)),
-          metricPicker()),
+          el('div', { class: 'controls' }, yearSelect(m), metricPicker())),
         planChanged ? el('p', { class: 'bt-info' }, el('span', { class: 'status expired' }, el('i', { 'aria-hidden': 'true' }, '!')),
           ` Cấu hình phương pháp (STRATEGIES) đã đổi sau khi tạo báo cáo này; ${running ? 'bot đang tạo lại báo cáo theo cấu hình mới.' : 'bot sẽ tạo lại báo cáo khi khởi động lại hoặc ở lần chạy định kỳ tới.'}`) : null,
         el('p', { class: 'bt-info' }, `Nguồn: ${[...bySource].map(([source, tfs]) => `${tfs.join(', ')} ${source}`).join('; ')}.`,
@@ -1621,8 +1640,9 @@
   });
   const fmtPf = (v) => (v == null ? '—' : v === Infinity ? '∞' : abs2(v));
   const hasTradeLog = (report) => (report.version || 1) >= 2;
-  // Thời điểm vào lệnh sớm nhất / muộn nhất có trong dữ liệu của một khung
-  const firstEntryOf = (res) => Date.parse(res.from) + minutesOf(res.timeframe) * 60000;
+  // Thời điểm vào lệnh sớm nhất / muộn nhất có trong dữ liệu của một khung; historyFrom: dữ liệu sớm nhất từng có
+  // qua các lần tạo báo cáo lưu trong Postgres (lệnh cũ đã trôi khỏi lịch sử TradingView vẫn được giữ)
+  const firstEntryOf = (res) => Date.parse(res.historyFrom || res.from) + minutesOf(res.timeframe) * 60000;
   const lastEntryOf = (res) => Date.parse(res.to) + minutesOf(res.timeframe) * 60000;
 
   function shiftMonths(day, months) {
@@ -1921,7 +1941,9 @@
     const toMs = dayEnd(range.to);
     const { rows, noData, partial } = rangeRows(results, fromMs, toMs);
     $('#bt-range-note').textContent =
-      `${fmtDate(fromMs)} → ${fmtDate(toMs)} (giờ VN) · số liệu tính lại từ từng lệnh của báo cáo backtest tạo lúc ${fmtTime(report.generatedAt)}, ` +
+      `${fmtDate(fromMs)} → ${fmtDate(toMs)} (giờ VN) · số liệu tính lại từ từng lệnh ` +
+      (report.history ? `cộng dồn qua ${report.history.runs} lần tạo báo cáo lưu trong Postgres, lần gần nhất lúc ${fmtTime(report.generatedAt)}, `
+        : `của báo cáo backtest tạo lúc ${fmtTime(report.generatedAt)}, `) +
       `dữ liệu tới ${fmtDate(Math.max(...results.map(lastEntryOf)))}`;
     const multiSymbol = symbols.length > 1 && f.symbol === 'ALL';
     const since = (list) => list.map((r) =>
@@ -2034,7 +2056,7 @@
     // và hỏi lại server bằng ETag (304 khi không đổi) thay vì tải lại cả báo cáo
     const wantBacktest = !state.backtest || state.view === 'backtest';
     const [signals, news, backtest] = await Promise.allSettled([
-      fetchJson(API_URL), fetchJson(NEWS_URL), wantBacktest ? fetchJson(BACKTEST_URL, 'no-cache') : null,
+      fetchJson(API_URL), fetchJson(NEWS_URL), wantBacktest ? fetchJson(backtestUrl(), 'no-cache') : null,
     ]);
     if (signals.status === 'fulfilled') {
       state.data = signals.value;

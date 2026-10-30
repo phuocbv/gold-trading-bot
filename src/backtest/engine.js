@@ -251,6 +251,7 @@ module.exports = {
   DEFAULT_BARS,
   REPORT_VERSION,
   TRADE_LOG_FIELDS,
+  OUTCOME_CODE,
   tradeLog,
   tradeCost,
   costLabel,

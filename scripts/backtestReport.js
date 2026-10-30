@@ -1,5 +1,5 @@
 /**
- * Tạo báo cáo backtest cho dashboard (data/backtest-report.json): mọi chiến lược trên các khung trong
+ * Tạo báo cáo backtest cho dashboard (data/backtest-report.json, và Postgres nếu có DATABASE_URL): mọi chiến lược trên các khung trong
  * BACKTEST_REPORT_TIMEFRAMES (mặc định 15m, 30m, 1h, 4h), chạy riêng từng chiến lược và chạy gộp các chiến lược
  * đang bật theo STRATEGIES, kèm đối chứng ngẫu nhiên và đánh giá theo tiêu chí đạt chuẩn.
  *
@@ -11,6 +11,7 @@ const { registry, getStrategyPlan, planSignature } = require('../src/strategies'
 const { runBacktest, summarize, randomControl, passes, tradeLog, PASS_CRITERIA, DEFAULT_BARS, REPORT_VERSION, TRADE_LOG_FIELDS, costLabel } = require('../src/backtest/engine');
 const { primaryStrategyName } = require('../src/tradeOutcome');
 const { writeJson } = require('../src/services/jsonStore');
+const { saveRunAndClose } = require('../src/backtest/store');
 
 function evaluate(symbol, candles, timeframe, trades, split, warmup) {
   const summary = summarize(trades, split);
@@ -78,7 +79,7 @@ async function main() {
     process.exit(1);
   }
 
-  writeJson(CONFIG.backtestReportPath, {
+  const report = {
     version: REPORT_VERSION,
     generatedAt: new Date().toISOString(),
     planSignature: planSignature(plan),
@@ -89,7 +90,9 @@ async function main() {
     cooldownBars: CONFIG.signalCooldownBars,
     candleWindow: CANDLE_LIMIT,
     results,
-  });
+  };
+  writeJson(CONFIG.backtestReportPath, report);
+  await saveRunAndClose('report', report);
   console.log(`✅ [BacktestReport] Đã ghi ${CONFIG.backtestReportPath} (${Math.round((Date.now() - started) / 1000)}s)`);
   process.exit(0);
 }

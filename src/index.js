@@ -4,7 +4,10 @@ const CONFIG = require('./config');
 const { scanMarket, runMarketBriefing, strategyPlan } = require('./botEngine');
 const { registerDashboard } = require('./dashboard/server');
 const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
-const { startReportJob, staleReports } = require('./backtest/reportJob');
+const { startReportJob, pendingReports } = require('./backtest/reportJob');
+const { syncReportFiles } = require('./backtest/store');
+const { initSignalStore, flushSignals } = require('./services/signalTracker');
+const { dbEnabled } = require('./services/db');
 
 function logNewsError(err) {
   console.error('❌ [News] Lỗi lịch tin tức:', err.message);
@@ -27,6 +30,7 @@ async function startBot() {
     ? `BẬT (${CONFIG.newsCurrencies.join('/')} mức ${CONFIG.newsImpacts.join('/')} | nhắn trước ${CONFIG.newsAlertMinutes} phút | chặn tín hiệu ±${CONFIG.newsBlackoutMinutes} phút)`
     : 'TẮT';
   console.log(`📰 Lịch tin tức: ${newsStatus}`);
+  console.log(`🗄️ Lưu trữ: ${dbEnabled() ? 'Postgres (DATABASE_URL) + file JSON dự phòng' : 'file JSON trong data/ (đặt DATABASE_URL để lưu vào Postgres)'}`);
   const activeCount = [...strategyPlan.values()].reduce((sum, list) => sum + list.length, 0);
   console.log(`📈 Chiến lược kích hoạt (${activeCount}) theo khung thời gian:`);
   for (const [timeframe, list] of strategyPlan) {
@@ -34,11 +38,15 @@ async function startBot() {
   }
   console.log('====================================================');
 
+  // Nạp tín hiệu đã ghi nhận (có Postgres thì gộp với file JSON) trước lượt quét đầu tiên
+  await initSignalStore();
+
   // Chế độ quét một lần (--once)
   if (isOnce) {
     console.log('\n⚡ Chế độ kiểm tra nhanh (--once): Đang tiến hành quét 1 lượt rồi thoát...');
     await refreshCalendar().catch(logNewsError);
     await scanMarket();
+    await flushSignals();
     console.log('✅ Hoàn tất lượt quét một lần. Tạm biệt!');
     process.exit(0);
   }
@@ -81,12 +89,19 @@ async function startBot() {
     scanMarket();
   });
 
+  // Báo cáo đang có trong file JSON mà Postgres chưa có (lần đầu bật Postgres, hoặc lần tạo trước mất kết nối)
+  if (dbEnabled()) {
+    await syncReportFiles().catch((err) => console.error('❌ [BacktestStore] Không lưu được báo cáo vào Postgres:', err.message));
+  }
+
   // Báo cáo backtest cho dashboard: tạo ngay báo cáo nào chưa có, cũ hơn 7 ngày hoặc được tạo theo cấu hình
   // STRATEGIES khác hiện tại (chỉ chạy lại đúng báo cáo đó), sau đó chạy định kỳ
   if (CONFIG.backtestReportEnabled) {
-    const stale = staleReports(7 * 24 * 3600 * 1000);
-    if (stale.length > 0) startReportJob('chưa có báo cáo, báo cáo đã cũ hoặc cấu hình phương pháp đã đổi', stale);
-    cron.schedule(CONFIG.backtestReportCron, () => startReportJob('lịch định kỳ'));
+    const jobs = await pendingReports(7 * 24 * 3600 * 1000);
+    if (jobs.length > 0) startReportJob('chưa có báo cáo, báo cáo đã cũ hoặc cấu hình phương pháp đã đổi', jobs);
+    cron.schedule(CONFIG.backtestReportCron, async () => {
+      startReportJob('lịch định kỳ', await pendingReports(0));
+    });
   }
 
   // Đặt lịch gửi bản tin AI Briefing lúc 13:00 (đầu phiên Âu) và 19:30 (đầu phiên Mỹ) theo giờ VN
@@ -95,15 +110,20 @@ async function startBot() {
   });
 }
 
-// Xử lý dừng tiến trình an toàn
+// Xử lý dừng tiến trình an toàn: chờ tối đa 5 giây để lưu nốt tín hiệu vào Postgres (phần chưa kịp lưu vẫn còn
+// trong file JSON và được lưu bổ sung ở lần khởi động sau)
+function shutdown() {
+  Promise.race([flushSignals(), new Promise((resolve) => setTimeout(resolve, 5000))]).finally(() => process.exit(0));
+}
+
 process.on('SIGINT', () => {
   console.log('\n🛑 Đã nhận lệnh dừng (Ctrl+C). Đang tắt Bot an toàn...');
-  process.exit(0);
+  shutdown();
 });
 
 process.on('SIGTERM', () => {
   console.log('\n🛑 Đã nhận tín hiệu kết thúc tiến trình (Từ Hosting/VPS).');
-  process.exit(0);
+  shutdown();
 });
 
 if (require.main === module) {

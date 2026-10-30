@@ -102,6 +102,10 @@ const CONFIG = {
   backtestReportPath: process.env.BACKTEST_REPORT_PATH || path.join(__dirname, '..', 'data', 'backtest-report.json'),
   // Backtest theo tháng và theo ngày (năm hiện tại) của các phương pháp đang bật, tạo cùng lịch với báo cáo backtest
   backtestMonthlyPath: process.env.BACKTEST_MONTHLY_PATH || path.join(__dirname, '..', 'data', 'backtest-monthly.json'),
+
+  // Postgres lưu lâu dài tín hiệu và mọi lần tạo báo cáo backtest (vd: postgres://user:pass@host:5432/db?sslmode=require).
+  // Bỏ trống thì chỉ lưu file JSON trong data/ như trước
+  databaseUrl: process.env.DATABASE_URL || '',
 };
 
 module.exports = CONFIG;
