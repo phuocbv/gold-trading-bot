@@ -390,14 +390,30 @@ async function fetchBinanceKlines(binanceSymbol = 'PAXGUSDT', interval = '15m', 
  * @param {object} [options] - { futures: true } để lấy từ Binance Futures USDⓈ-M thay vì Spot
  */
 async function fetchBinanceHistory(binanceSymbol, interval, bars, { futures = false } = {}) {
-  const base = futures ? 'https://fapi.binance.com/fapi/v1/klines' : `${BINANCE_ENDPOINTS[0]}/api/v3/klines`;
+  // Spot có nhiều máy chủ dự phòng; mỗi trang thử lại tối đa 3 lần (đổi máy chủ, chờ tăng dần) để một lỗi
+  // tạm thời không làm mất cả chục trang đã tải
+  const bases = futures
+    ? ['https://fapi.binance.com/fapi/v1/klines']
+    : BINANCE_ENDPOINTS.map((endpoint) => `${endpoint}/api/v3/klines`);
   const pageSize = futures ? 1500 : 1000;
+  const fetchPage = async (query) => {
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { data } = await axios.get(`${bases[attempt % bases.length]}?${query}`, { timeout: 15000 });
+        return data;
+      } catch (err) {
+        lastError = err;
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+      }
+    }
+    throw lastError;
+  };
   let endTime = Date.now();
   let rows = [];
   while (rows.length < bars) {
     const limit = Math.min(pageSize, bars - rows.length);
-    const url = `${base}?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}&endTime=${endTime}`;
-    const { data } = await axios.get(url, { timeout: 15000 });
+    const data = await fetchPage(`symbol=${binanceSymbol}&interval=${interval}&limit=${limit}&endTime=${endTime}`);
     if (!Array.isArray(data) || data.length === 0) break;
     rows = data.concat(rows);
     endTime = data[0][0] - 1;

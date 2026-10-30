@@ -54,6 +54,14 @@ function getStrategyPlan(plan = null) {
 }
 
 /**
+ * Chữ ký của kế hoạch chạy (khung -> tên chiến lược), lưu vào báo cáo backtest để biết báo cáo
+ * được tạo theo cấu hình STRATEGIES nào
+ */
+function planSignature(plan = getStrategyPlan()) {
+  return JSON.stringify([...plan].map(([tf, list]) => [tf, list.map((s) => s.key)]));
+}
+
+/**
  * Chạy các chiến lược trên tập dữ liệu nến hiện tại và tính toán hợp lưu & xếp hạng
  * @param {object} marketData - Dữ liệu nến (chỉ gồm các nến đã đóng)
  * @param {object} [options] - { silent: true } để tắt log (dùng cho backtest), { strategies } để chỉ chạy một số chiến lược
@@ -146,5 +154,6 @@ module.exports = {
   strategies,
   registry,
   getStrategyPlan,
+  planSignature,
   evaluateAllStrategies,
 };

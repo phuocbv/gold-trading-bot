@@ -17,6 +17,11 @@ const RANDOM_SEEDS = 200;
 // Số nến tải cho từng khung (gồm CANDLE_LIMIT nến khởi tạo), dùng chung cho CLI và báo cáo để ra cùng kết quả.
 // TradingView ẩn danh giới hạn lịch sử: 15m ~5.500 nến, 30m từ đầu năm nay, 1h/2h từ năm trước, 4h ~4 năm, 1D ~40 năm
 const DEFAULT_BARS = { '15m': 6000, '30m': 10000, '1h': 11000, '2h': 8000, '4h': 6000, '1d': 10000 };
+// Phiên bản cấu trúc báo cáo backtest: tăng khi đổi cấu trúc để bot tự tạo lại báo cáo cũ lúc khởi động
+// (2: thêm danh sách lệnh của từng phương pháp để dashboard lọc theo khoảng thời gian)
+const REPORT_VERSION = 2;
+const TRADE_LOG_FIELDS = ['entryMinute', 'side', 'outcome', 'netR'];
+const OUTCOME_CODE = { TP: 1, SL: -1, EXPIRED: 0 };
 
 /**
  * Chi phí mỗi lệnh quy về đơn vị giá: Vàng spread $0.35/oz, Crypto phí 0.1% x 2 chiều
@@ -127,7 +132,9 @@ const round = (v, d = 3) => (v == null || !Number.isFinite(v) ? null : +v.toFixe
 /**
  * Thống kê một danh sách lệnh; splitIndex tách giai đoạn đầu / giai đoạn sau
  */
-function summarize(trades, splitIndex) {
+function summarize(allTrades, splitIndex) {
+  // Lệnh còn mở ở cuối dữ liệu chưa có kết quả (R chỉ là tạm tính) nên không tính vào thống kê
+  const trades = allTrades.filter((t) => !t.open);
   const wins = trades.filter((t) => t.outcome === 'TP').length;
   const losses = trades.filter((t) => t.outcome === 'SL').length;
   let cum = 0, peak = 0, maxDrawdown = 0, gain = 0, loss = 0;
@@ -157,6 +164,17 @@ function summarize(trades, splitIndex) {
     buy: { trades: buys.length, avgNet: round(avg(buys)) },
     sell: { trades: sells.length, avgNet: round(avg(sells)) },
   };
+}
+
+/**
+ * Danh sách lệnh đã đóng dạng gọn (theo TRADE_LOG_FIELDS) để dashboard tính lại thống kê theo khoảng thời gian:
+ * [phút vào lệnh (Unix ms / 60000, lúc nến tín hiệu đóng), chiều (1 MUA, -1 BÁN), kết quả (1 TP, -1 SL, 0 hết hạn), R sau chi phí]
+ */
+function tradeLog(trades, timeframe) {
+  const windowMs = timeframeToMs(timeframe);
+  return trades
+    .filter((t) => !t.open)
+    .map((t) => [Math.round((t.time + windowMs) / 60000), t.action === 'BUY' ? 1 : -1, OUTCOME_CODE[t.outcome], round(t.net)]);
 }
 
 // PRNG có seed để phép đối chứng cho kết quả lặp lại được
@@ -203,7 +221,7 @@ function randomControl({ symbol, candles, timeframe, count, realAvgNet, horizon 
       const signal = { strategy: 'Random', action, entry, stopLoss: entry - d * risk, takeProfit: entry + d * 2 * risk };
       trades.push(toTrade(candles, i, signal, { symbol, horizon, spread }));
     }
-    results.push(avg(trades));
+    results.push(avg(trades.filter((t) => !t.open)));
   }
   return {
     p: round(results.filter((v) => v >= realAvgNet).length / seeds),
@@ -224,6 +242,9 @@ function passes(summary, p) {
 module.exports = {
   PASS_CRITERIA,
   DEFAULT_BARS,
+  REPORT_VERSION,
+  TRADE_LOG_FIELDS,
+  tradeLog,
   tradeCost,
   costLabel,
   toMarketData,

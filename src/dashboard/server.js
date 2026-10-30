@@ -1,3 +1,4 @@
+const fs = require('fs');
 const CONFIG = require('../config');
 const { listSignals, describeAsset } = require('../services/signalTracker');
 const { getNewsOverview } = require('../services/newsCalendar');
@@ -5,6 +6,22 @@ const { getStrategyPlan } = require('../strategies');
 const { primaryStrategyName } = require('../tradeOutcome');
 const { readJson } = require('../services/jsonStore');
 const { getReportJobStatus } = require('../backtest/reportJob');
+
+// Báo cáo backtest chỉ đổi mỗi tuần: giữ bản đã đọc, chỉ đọc lại khi file thay đổi
+const reportCache = new Map();
+function readReport(file) {
+  let mtimeMs;
+  try {
+    mtimeMs = fs.statSync(file).mtimeMs;
+  } catch (err) {
+    return null;
+  }
+  const cached = reportCache.get(file);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.data;
+  const data = readJson(file, null);
+  reportCache.set(file, { mtimeMs, data });
+  return data;
+}
 
 /**
  * Chặn truy cập dashboard khi có cấu hình DASHBOARD_TOKEN mà URL không kèm ?token= đúng
@@ -45,8 +62,8 @@ function registerDashboard(app) {
 
   app.get('/api/backtest', requireToken, (req, res) => {
     res.json({
-      report: readJson(CONFIG.backtestReportPath, null),
-      monthly: readJson(CONFIG.backtestMonthlyPath, null),
+      report: readReport(CONFIG.backtestReportPath),
+      monthly: readReport(CONFIG.backtestMonthlyPath),
       job: getReportJobStatus(),
       // Phương pháp đang bật theo từng khung, để báo cáo đánh dấu đúng kể cả khi cấu hình đổi sau lần chạy báo cáo
       active: Object.fromEntries([...getStrategyPlan()].map(([tf, list]) => [tf, list.map((s) => s.key)])),
