@@ -80,7 +80,10 @@ const CONFIG = {
   signalDbPath: process.env.SIGNAL_DB_PATH || path.join(__dirname, '..', 'data', 'signals.json'),
   // Lệnh chưa chạm TP1/SL sau N nến thì chốt theo giá đóng cửa (giống horizon mặc định của backtest)
   signalTrackHorizonBars: parseInt(process.env.SIGNAL_TRACK_HORIZON_BARS || '48', 10),
-  // Nếu đặt, dashboard yêu cầu ?token=... trên URL
+  // Tài khoản đăng nhập dashboard (/login); đặt cả hai thì phải đăng nhập mới xem được dashboard và API
+  dashboardUsername: process.env.DASHBOARD_USERNAME || '',
+  dashboardPassword: process.env.DASHBOARD_PASSWORD || '',
+  // Nếu đặt, dashboard cũng nhận ?token=... trên URL (cách cũ, vẫn dùng được cùng đăng nhập)
   dashboardToken: process.env.DASHBOARD_TOKEN || '',
 
   // Lịch tin tức kinh tế (ForexFactory): nhắn Telegram trước giờ ra tin & chặn tín hiệu quanh giờ ra tin

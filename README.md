@@ -131,7 +131,13 @@ TRADINGVIEW_SYMBOL=OANDA:XAUUSD
 GEMINI_API_KEYS=gemini_key_1,gemini_key_2,gemini_key_3
 GEMINI_MODEL=gemini-3.8-flash
 AI_MIN_CONFIDENCE=75
+
+# Đăng nhập dashboard (http://<host>:3000/dashboard): đặt cả hai thì phải đăng nhập mới xem được
+DASHBOARD_USERNAME=admin
+DASHBOARD_PASSWORD=mat_khau_dai_kho_doan
 ```
+
+Dashboard chỉ cần đăng nhập khi đặt cả `DASHBOARD_USERNAME` và `DASHBOARD_PASSWORD`; phiên đăng nhập giữ 30 ngày, sai mật khẩu 5 lần thì khóa 15 phút, đổi mật khẩu thì mọi phiên cũ phải đăng nhập lại. Chạy sau HTTPS (nginx, Render...) thì cookie tự bật `Secure`; mở thẳng `http://IP:3000` thì mật khẩu đi qua mạng không mã hóa, nên đặt dashboard sau HTTPS khi dùng ngoài mạng nội bộ.
 
 ---
 

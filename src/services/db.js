@@ -126,6 +126,38 @@ async function withTransaction(fn) {
   }
 }
 
+// Máy chủ trong DATABASE_URL để ghi log (không gồm tài khoản, mật khẩu)
+function dbHost() {
+  try {
+    const url = new URL(CONFIG.databaseUrl);
+    return `${url.hostname}${url.port ? `:${url.port}` : ''}${url.pathname}`;
+  } catch (err) {
+    return 'DATABASE_URL';
+  }
+}
+
+/**
+ * Kiểm tra kết nối Postgres lúc khởi động (tạo bảng nếu chưa có) và ghi log: máy chủ, phiên bản, thời gian kết nối,
+ * số dòng mỗi bảng. Lỗi không làm dừng bot. Trả về true nếu kết nối được
+ */
+async function logDbStatus() {
+  if (!dbEnabled()) return false;
+  const started = Date.now();
+  try {
+    const { rows: [info] } = await query(`SELECT current_setting('server_version') AS version,
+      (SELECT count(*) FROM signals)::int AS signals,
+      (SELECT count(*) FROM backtest_runs)::int AS runs,
+      (SELECT count(*) FROM backtest_trades)::int AS trades`);
+    console.log(`🗄️ Postgres: đã kết nối ${dbHost()} (PostgreSQL ${info.version.split(' ')[0]}, ${Date.now() - started} ms) | ` +
+      `signals ${info.signals} · backtest_runs ${info.runs} · backtest_trades ${info.trades} dòng`);
+    return true;
+  } catch (err) {
+    console.error(`❌ Postgres: không kết nối được ${dbHost()} sau ${Date.now() - started} ms (${err.message}). ` +
+      'Bot vẫn chạy và lưu file JSON trong data/, tự lưu bổ sung vào Postgres khi kết nối lại được.');
+    return false;
+  }
+}
+
 /**
  * Đóng kết nối để tiến trình (vd: script tạo báo cáo) thoát được
  */
@@ -139,6 +171,7 @@ async function closeDb() {
 
 module.exports = {
   dbEnabled,
+  logDbStatus,
   query,
   withTransaction,
   closeDb,

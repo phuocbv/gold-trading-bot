@@ -7,7 +7,8 @@ const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
 const { startReportJob, pendingReports } = require('./backtest/reportJob');
 const { syncReportFiles } = require('./backtest/store');
 const { initSignalStore, flushSignals } = require('./services/signalTracker');
-const { dbEnabled } = require('./services/db');
+const { dbEnabled, logDbStatus } = require('./services/db');
+const { loginEnabled } = require('./dashboard/auth');
 
 function logNewsError(err) {
   console.error('❌ [News] Lỗi lịch tin tức:', err.message);
@@ -38,7 +39,8 @@ async function startBot() {
   }
   console.log('====================================================');
 
-  // Nạp tín hiệu đã ghi nhận (có Postgres thì gộp với file JSON) trước lượt quét đầu tiên
+  // Kiểm tra kết nối Postgres, rồi nạp tín hiệu đã ghi nhận (có Postgres thì gộp với file JSON) trước lượt quét đầu tiên
+  await logDbStatus();
   await initSignalStore();
 
   // Chế độ quét một lần (--once)
@@ -67,7 +69,10 @@ async function startBot() {
 
   app.listen(PORT, () => {
     console.log(`\n🌐 Web server giả đang chạy tại cổng ${PORT} để tránh trạng thái Sleep.`);
-    console.log(`📊 Dashboard thống kê tín hiệu: http://localhost:${PORT}/dashboard${CONFIG.dashboardToken ? '?token=<DASHBOARD_TOKEN>' : ''}`);
+    console.log(`📊 Dashboard thống kê tín hiệu: http://localhost:${PORT}/dashboard${CONFIG.dashboardToken && !loginEnabled() ? '?token=<DASHBOARD_TOKEN>' : ''}`);
+    if (loginEnabled()) console.log(`🔐 Dashboard yêu cầu đăng nhập (tài khoản ${CONFIG.dashboardUsername}).`);
+    else if (CONFIG.dashboardUsername || CONFIG.dashboardPassword) console.warn('⚠️ Dashboard: cần đặt cả DASHBOARD_USERNAME và DASHBOARD_PASSWORD để bật đăng nhập.');
+    else if (!CONFIG.dashboardToken) console.warn('⚠️ Dashboard đang mở cho mọi người: đặt DASHBOARD_USERNAME và DASHBOARD_PASSWORD để yêu cầu đăng nhập.');
   });
 
   // Tải lịch tin trước lượt quét đầu tiên để bộ chặn tín hiệu quanh giờ ra tin có dữ liệu

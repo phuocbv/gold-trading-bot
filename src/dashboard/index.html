@@ -84,6 +84,8 @@
   }
   main { max-width: 1320px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; justify-content: space-between; }
+  .account { display: flex; align-items: center; gap: 10px; margin: 0; }
   h2 { font-size: 15px; font-weight: 600; margin: 0; }
   .sub, .note { color: var(--text-2); font-size: 13px; margin: 2px 0 0; }
   .pos { color: var(--pos-text); }
@@ -236,8 +238,14 @@
 <body>
 <main>
   <header>
-    <h1>Thống kê tín hiệu</h1>
-    <p class="sub" id="updated">Đang tải dữ liệu…</p>
+    <div>
+      <h1>Thống kê tín hiệu</h1>
+      <p class="sub" id="updated">Đang tải dữ liệu…</p>
+    </div>
+    <form class="account" id="account" method="post" hidden>
+      <span class="note" id="account-name"></span>
+      <button type="submit" class="btn">Đăng xuất</button>
+    </form>
   </header>
 
   <div class="error" id="error" hidden></div>
@@ -446,6 +454,11 @@
   const API_URL = withToken('api/signals');
   const NEWS_URL = withToken('api/news');
   const BACKTEST_URL = withToken('api/backtest');
+  // API trả 401: chưa đăng nhập hoặc hết phiên thì chuyển sang trang đăng nhập; dùng ?token= thì báo sai token
+  function unauthorized() {
+    if (!token) location.assign(`${API_BASE}login`);
+    return token ? 'Sai hoặc thiếu token truy cập' : 'Phiên đăng nhập đã hết hạn, đang chuyển sang trang đăng nhập…';
+  }
   const backtestUrl = () => BACKTEST_URL + (state.btYear ? `${token ? '&' : '?'}year=${state.btYear}` : '');
   const IMPACT_LABELS = { High: 'Mạnh', Medium: 'Trung bình', Low: 'Thấp' };
   const STATUS = {
@@ -1081,8 +1094,17 @@
     renderSignals(list);
   }
 
+  function renderAccount() {
+    const form = $('#account');
+    form.hidden = !state.data.user;
+    if (!state.data.user) return;
+    form.action = `${API_BASE}logout`;
+    $('#account-name').textContent = state.data.user;
+  }
+
   function render() {
     if (!state.data) return;
+    renderAccount();
     renderControls();
     renderContent();
     const d = state.data;
@@ -1565,7 +1587,7 @@
     try {
       const res = await fetch(`${DAY_CHECK_URL}${token ? '&' : '?'}date=${day}`, { cache: 'no-store' });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || (res.status === 401 ? 'Sai hoặc thiếu token truy cập' : `HTTP ${res.status}`));
+      if (!res.ok) throw new Error(res.status === 401 ? unauthorized() : body.error || `HTTP ${res.status}`);
       next = { day, result: body };
     } catch (err) {
       next = { day, error: err.message };
@@ -2155,7 +2177,7 @@
 
   async function fetchJson(url, cache = 'no-store') {
     const res = await fetch(url, { cache });
-    if (!res.ok) throw new Error(res.status === 401 ? 'Sai hoặc thiếu token truy cập' : `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(res.status === 401 ? unauthorized() : `HTTP ${res.status}`);
     return res.json();
   }
 

@@ -1,5 +1,7 @@
 const fs = require('fs');
+const express = require('express');
 const CONFIG = require('../config');
+const { loginEnabled, sessionUser, login, logout, requireAuth } = require('./auth');
 const { listSignals, listStoredSignals, describeAsset } = require('../services/signalTracker');
 const { getNewsOverview } = require('../services/newsCalendar');
 const { getStrategyPlan } = require('../strategies');
@@ -55,25 +57,35 @@ function readReport(file) {
 }
 
 /**
- * Chặn truy cập dashboard khi có cấu hình DASHBOARD_TOKEN mà URL không kèm ?token= đúng
- */
-function requireToken(req, res, next) {
-  if (!CONFIG.dashboardToken || req.query.token === CONFIG.dashboardToken) return next();
-  res.status(401).send('Unauthorized');
-}
-
-/**
- * Đăng ký trang thống kê tín hiệu (/dashboard) và API dữ liệu (/api/signals) vào Express app
+ * Đăng ký trang thống kê tín hiệu (/dashboard), trang đăng nhập (/login) và API dữ liệu (/api/*) vào Express app
  */
 function registerDashboard(app) {
-  app.get('/dashboard', requireToken, (req, res) => {
+  // Đường dẫn chuyển hướng tương đối để vẫn đúng khi dashboard nằm sau tiền tố proxy
+  app.get('/login', (req, res) => {
+    if (!loginEnabled() || sessionUser(req)) return res.redirect(303, 'dashboard');
+    res.set('Cache-Control', 'no-store');
+    res.sendFile('login.html', { root: __dirname });
+  });
+
+  app.post('/login', express.urlencoded({ extended: false, limit: '4kb' }), (req, res) => {
+    if (!loginEnabled()) return res.redirect(303, 'dashboard');
+    const result = login(req, res, (req.body || {}).username, (req.body || {}).password);
+    res.redirect(303, result === 'ok' ? 'dashboard' : `login?error=${result}`);
+  });
+
+  app.post('/logout', (req, res) => {
+    logout(req, res);
+    res.redirect(303, 'login');
+  });
+
+  app.get('/dashboard', requireAuth, (req, res) => {
     // Dùng root để Express không chặn khi đường dẫn dự án chứa thư mục ẩn (vd: ~/.gemini/...)
     res.sendFile('index.html', { root: __dirname });
   });
 
   // Đọc từ Postgres ở mỗi lần tải (lỗi kết nối thì dùng danh sách trong bộ nhớ của bot, chỉ báo lỗi một lần mỗi đợt)
   let signalsDbFailing = false;
-  app.get('/api/signals', requireToken, async (req, res) => {
+  app.get('/api/signals', requireAuth, async (req, res) => {
     let records;
     try {
       records = await listStoredSignals();
@@ -87,6 +99,8 @@ function registerDashboard(app) {
     const symbols = [...new Set([...CONFIG.symbols, ...records.map((r) => r.symbol)])];
     res.json({
       generatedAt: new Date().toISOString(),
+      // Tài khoản đang đăng nhập (để dashboard hiện nút Đăng xuất); null khi không dùng đăng nhập
+      user: sessionUser(req),
       timeframe: CONFIG.timeframe,
       horizonBars: CONFIG.signalTrackHorizonBars,
       assets: symbols.map(describeAsset),
@@ -97,12 +111,12 @@ function registerDashboard(app) {
     });
   });
 
-  app.get('/api/news', requireToken, (req, res) => {
+  app.get('/api/news', requireAuth, (req, res) => {
     res.json(getNewsOverview());
   });
 
   // ?year=YYYY: báo cáo theo tháng của năm đó (chỉ có khi lưu Postgres; mặc định năm gần nhất)
-  app.get('/api/backtest', requireToken, async (req, res) => {
+  app.get('/api/backtest', requireAuth, async (req, res) => {
     const year = /^\d{4}$/.test(String(req.query.year || '')) ? Number(req.query.year) : null;
     let stored = null;
     if (dbEnabled()) {
@@ -129,7 +143,7 @@ function registerDashboard(app) {
   });
 
   // Các phương pháp đang bật cho tín hiệu gì trong một ngày (?date=YYYY-MM-DD, giờ VN)
-  app.get('/api/backtest/day', requireToken, async (req, res) => {
+  app.get('/api/backtest/day', requireAuth, async (req, res) => {
     const day = parseDay(String(req.query.date || ''));
     if (!day || day > dayKey(Date.now())) {
       res.status(400).json({ error: 'Ngày không hợp lệ hoặc chưa tới' });

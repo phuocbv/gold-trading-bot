@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Đăng nhập</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --text-1: #0b0b0b;
+    --text-2: #52514e;
+    --border: rgba(11, 11, 11, 0.10);
+    --hover: rgba(11, 11, 11, 0.04);
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --text-1: #f0efec;
+      --text-2: #c3c2b7;
+      --border: rgba(255, 255, 255, 0.10);
+      --hover: rgba(255, 255, 255, 0.04);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --text-1: #f0efec;
+    --text-2: #c3c2b7;
+    --border: rgba(255, 255, 255, 0.10);
+    --hover: rgba(255, 255, 255, 0.04);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+    background: var(--page); color: var(--text-1);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    width: 100%; max-width: 360px; padding: 24px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  .sub { color: var(--text-2); font-size: 13px; margin: 2px 0 20px; }
+  form { display: flex; flex-direction: column; gap: 14px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+  input {
+    font: inherit; font-size: 14px; color: var(--text-1);
+    background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; min-height: 38px;
+  }
+  button {
+    font: inherit; font-size: 14px; font-weight: 600; color: var(--text-1); cursor: pointer; margin-top: 4px;
+    background: var(--hover); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; min-height: 38px;
+  }
+  .error {
+    margin: 0 0 16px; padding: 8px 12px; border-radius: 8px; font-size: 13px;
+    border: 1px solid var(--border); background: var(--page);
+  }
+  .error::before { content: "✕"; color: var(--critical); font-weight: 700; margin-right: 8px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Thống kê tín hiệu</h1>
+  <p class="sub">Đăng nhập để xem dashboard</p>
+  <p class="error" id="error" role="alert" hidden></p>
+  <form method="post" action="login">
+    <label>Tên đăng nhập
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>Mật khẩu
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Đăng nhập</button>
+  </form>
+</main>
+<script>
+  const ERRORS = {
+    invalid: 'Sai tên đăng nhập hoặc mật khẩu.',
+    locked: 'Đăng nhập sai quá nhiều lần, vui lòng thử lại sau 15 phút.',
+  };
+  const message = ERRORS[new URLSearchParams(location.search).get('error')];
+  if (message) {
+    const box = document.getElementById('error');
+    box.textContent = message;
+    box.hidden = false;
+  }
+</script>
+</body>
+</html>
