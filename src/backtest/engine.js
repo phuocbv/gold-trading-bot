@@ -76,8 +76,11 @@ function toTrade(candles, index, signal, { symbol, horizon, spread }) {
     takeProfit: signal.takeProfit,
     outcome,
     open,
-    // Thời điểm mở của nến chạm TP1/SL (hoặc nến cuối khi hết hạn / hết dữ liệu)
+    // Thời điểm mở của nến chạm TP1/SL (hoặc nến cuối khi hết hạn / hết dữ liệu), số nến đã giữ lệnh và giá thoát
+    // (lệnh còn mở: giá đóng cửa nến cuối), giống cách bot thật theo dõi lệnh
     exitTime: candles[exit].date.getTime(),
+    bars: exit - index,
+    exitPrice: outcome === 'SL' ? signal.stopLoss : outcome === 'TP' ? signal.takeProfit : candles[exit].close,
     r,
     net: r - tradeCost(symbol, signal.entry, spread) / risk,
   };

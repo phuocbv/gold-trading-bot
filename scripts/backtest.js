@@ -21,6 +21,8 @@ const { runBacktest, summarize, costLabel, DEFAULT_BARS } = require('../src/back
 function parseArgs(argv) {
   const args = { symbols: [], bars: null, horizon: CONFIG.signalTrackHorizonBars, binance: false, timeframe: null, strategies: null, spread: null };
   for (let i = 0; i < argv.length; i++) {
+    // pnpm truyền nguyên dấu "--" của "pnpm run backtest -- XAU/USD" vào script
+    if (argv[i] === '--') continue;
     if (argv[i] === '--bars') args.bars = parseInt(argv[++i], 10);
     else if (argv[i] === '--horizon') args.horizon = parseInt(argv[++i], 10);
     else if (argv[i] === '--binance') args.binance = true;

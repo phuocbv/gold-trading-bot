@@ -32,7 +32,7 @@ Hệ thống tự động phân tích thị trường Vàng (XAU/USD) & Crypto (
 - Mục **Thống kê theo khoảng thời gian** trên tab báo cáo: chọn khoảng (1 tháng → 10 năm, từng năm, hoặc tự nhập ngày), khung, phương pháp; bảng xếp hạng theo tổng R / R/lệnh / tỉ lệ thắng / PF và biểu đồ R tích lũy so sánh tối đa 5 phương pháp. Số liệu tính lại từ danh sách lệnh lưu trong báo cáo (có Postgres thì từ toàn bộ lệnh cộng dồn qua các lần tạo báo cáo, xem mục 4); báo cáo tạo bằng phiên bản cũ được bot tự tạo lại khi khởi động.
 - Mục **Theo tháng** trên tab báo cáo: tỉ lệ thắng và tổng R từng tháng của năm hiện tại (có Postgres thì chọn được cả các năm trước) cho mỗi phương pháp đang bật, kèm dòng gộp theo quy trình bot ở mỗi khung và dòng toàn bot. Khung 15m của Vàng lấy dữ liệu Binance Futures XAUUSDT (lọc theo giờ giao dịch OANDA) vì TradingView ẩn danh chỉ có ~5.500 nến 15m. Tạo cùng lịch với báo cáo backtest; chạy tay: `npm run backtest:monthly` hoặc `node scripts/backtestMonthly.js XAU/USD --year 2026`.
 - Mục **Theo ngày** ngay bên dưới: chọn một tháng, mỗi dòng là một ngày (giờ VN) với tổng R và số lệnh chạm TP1 ở từng khung (theo quy trình bot) và toàn bot, rê chuột vào ô để xem từng lệnh (giờ vào, chiều, phương pháp, kết quả); cuối bảng có số ngày lãi/lỗ. In bảng theo ngày ra màn hình: `npm run backtest:daily` (tháng gần nhất) hoặc `node scripts/backtestMonthly.js --year 2025 --days 3`.
-- Mục **Kiểm tra tín hiệu theo ngày**: chọn một ngày (mặc định hôm nay, hoặc bấm vào ngày trong bảng theo ngày) để chạy các phương pháp đang bật theo đúng quy trình bot trên dữ liệu mới nhất: tín hiệu bot sẽ phát (giờ vào, entry, SL, TP1, kết quả tới hiện tại), tín hiệu riêng của từng phương pháp bị bot lọc kèm lý do (ngược chiều cùng nến, cooldown) và tín hiệu bot thật đã ghi nhận để đối chiếu. Chạy tay: `npm run backtest:day` (hôm nay) hoặc `npm run backtest:day -- 22/10` (cũng nhận `22/10/2025`, `2025-10-22`).
+- Mục **Kiểm tra tín hiệu theo ngày**: chọn một ngày (mặc định hôm nay, hoặc bấm vào ngày trong bảng theo ngày) để chạy các phương pháp đang bật theo đúng quy trình bot trên dữ liệu mới nhất: tín hiệu bot sẽ phát (giờ vào, entry, SL, TP1, kết quả tới hiện tại), tín hiệu riêng của từng phương pháp bị bot lọc kèm lý do (ngược chiều cùng nến, cooldown) và tín hiệu bot thật đã ghi nhận để đối chiếu. Chạy tay: `npm run backtest:day` (hôm nay) hoặc `npm run backtest:day -- 22/10` (cũng nhận `22/10/2025`, `2025-10-22`); có Postgres thì mỗi lần chạy tay được lưu lại (xem mục 4). Chạy tay cũng bổ sung các tín hiệu bot sẽ phát vào **Danh sách tín hiệu** (nhãn "backtest", lọc bằng ô "Nguồn") để có dữ liệu những ngày bot chưa chạy: chống trùng theo mã tín hiệu như bot thật (tài sản | chiều | giờ nến), đã có tín hiệu bot thật thì bỏ qua, chạy lại chỉ cập nhật kết quả lệnh còn mở. Tín hiệu bổ sung chưa qua bộ lọc AI và chặn tin tức.
 - Backtest dòng lệnh: `npm run backtest` (theo `STRATEGIES`), hoặc `node scripts/backtest.js XAU/USD --timeframe 4h --strategies donchian-55`.
 
 ### 4. Lưu Trữ Lâu Dài Bằng PostgreSQL:
@@ -45,8 +45,8 @@ DATABASE_URL=postgres://user:password@host:5432/dbname?sslmode=require
 
 | Bảng | Nội dung |
 | --- | --- |
-| `signals` | Tín hiệu bot đã phát (hoặc AI từ chối) và kết quả TP1/SL/hết hạn; cột `data` là bản ghi đầy đủ, `r_multiple` là R của lệnh đã đóng |
-| `backtest_runs` | Mỗi lần tạo báo cáo backtest (`kind = 'report'` tổng hợp, `'monthly'` theo tháng của `year`) là một bản riêng, không ghi đè |
+| `signals` | Tín hiệu bot đã phát (hoặc AI từ chối) và kết quả TP1/SL/hết hạn; cột `data` là bản ghi đầy đủ, `r_multiple` là R của lệnh đã đóng, `origin` là `'bot'` (bot thật) hoặc `'backtest'` (bổ sung bằng `npm run backtest:day`) |
+| `backtest_runs` | Mỗi lần tạo báo cáo backtest là một bản riêng, không ghi đè: `kind = 'report'` tổng hợp, `'monthly'` theo tháng của `year`, `'day'` kết quả `npm run backtest:day` (mỗi ngày mỗi tài sản một dòng, chạy lại thì thay bằng lần mới nhất; ngày ở `payload->>'day'`) |
 | `backtest_trades` | Từng lệnh backtest của báo cáo tổng hợp, cộng dồn qua các lần chạy nên giữ được cả giai đoạn TradingView ẩn danh không còn trả về (15m chỉ ~2 tháng gần nhất) |
 
 - Mỗi lần chạy, lệnh trong khoảng dữ liệu của lần đó được thay bằng kết quả mới nhất, lệnh cũ hơn được giữ nguyên. Nếu sửa logic một phương pháp, lệnh cũ ngoài khoảng dữ liệu vẫn theo logic trước: muốn tính lại từ đầu thì xóa lệnh của phương pháp đó (`DELETE FROM backtest_trades WHERE strategy = 'donchian-55'`).
@@ -55,11 +55,18 @@ DATABASE_URL=postgres://user:password@host:5432/dbname?sslmode=require
 - Ví dụ thống kê trực tiếp bằng SQL:
 
 ```sql
--- Tín hiệu đã gửi theo tháng (giờ VN) và phương pháp: số lệnh đã đóng, tỉ lệ thắng TP1 / (TP1 + SL), tổng R
+-- Tín hiệu bot thật đã gửi theo tháng (giờ VN) và phương pháp: số lệnh đã đóng, tỉ lệ thắng TP1 / (TP1 + SL), tổng R
+-- (bỏ "AND origin = 'bot'" để tính cả tín hiệu bổ sung từ backtest)
 SELECT date_trunc('month', candle_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS month, strategy, count(*) AS trades,
        round(avg((status = 'TP')::int) FILTER (WHERE status IN ('TP', 'SL')) * 100) AS win_pct,
        round(sum(r_multiple)::numeric, 2) AS total_r
-FROM signals WHERE sent AND status <> 'OPEN' GROUP BY 1, 2 ORDER BY 1 DESC, 2;
+FROM signals WHERE sent AND status <> 'OPEN' AND origin = 'bot' GROUP BY 1, 2 ORDER BY 1 DESC, 2;
+
+-- Kết quả npm run backtest:day ngày 22/10/2026: số tín hiệu bot sẽ phát và số tín hiệu bot thật đã ghi nhận
+SELECT payload->>'symbol' AS symbol, generated_at,
+       (SELECT count(*) FROM jsonb_array_elements(payload->'timeframes') t, jsonb_array_elements(t->'signals')) AS signals,
+       jsonb_array_length(payload->'live') AS live
+FROM backtest_runs WHERE kind = 'day' AND payload->>'day' = '2026-10-22';
 
 -- Backtest Donchian 55 khung 2h theo năm: số lệnh, tổng R sau chi phí
 SELECT extract(year FROM entry_time AT TIME ZONE 'Asia/Ho_Chi_Minh') AS year, count(*) AS trades, round(sum(net_r)::numeric, 1) AS total_r

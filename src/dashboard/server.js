@@ -1,6 +1,6 @@
 const fs = require('fs');
 const CONFIG = require('../config');
-const { listSignals, describeAsset } = require('../services/signalTracker');
+const { listSignals, listStoredSignals, describeAsset } = require('../services/signalTracker');
 const { getNewsOverview } = require('../services/newsCalendar');
 const { getStrategyPlan } = require('../strategies');
 const { primaryStrategyName } = require('../tradeOutcome');
@@ -71,8 +71,18 @@ function registerDashboard(app) {
     res.sendFile('index.html', { root: __dirname });
   });
 
-  app.get('/api/signals', requireToken, (req, res) => {
-    const records = listSignals();
+  // Đọc từ Postgres ở mỗi lần tải (lỗi kết nối thì dùng danh sách trong bộ nhớ của bot, chỉ báo lỗi một lần mỗi đợt)
+  let signalsDbFailing = false;
+  app.get('/api/signals', requireToken, async (req, res) => {
+    let records;
+    try {
+      records = await listStoredSignals();
+      signalsDbFailing = false;
+    } catch (err) {
+      if (!signalsDbFailing) console.error('❌ [Dashboard] Không đọc được tín hiệu từ Postgres, dùng dữ liệu trong bộ nhớ:', err.message);
+      signalsDbFailing = true;
+      records = listSignals();
+    }
     // Thứ tự tài sản cố định (theo cấu hình) để mỗi tài sản luôn giữ một màu trên biểu đồ
     const symbols = [...new Set([...CONFIG.symbols, ...records.map((r) => r.symbol)])];
     res.json({

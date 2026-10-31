@@ -228,6 +228,9 @@
   .cmp .line-key { width: 14px; }
   td.rank { color: var(--muted); font-variant-numeric: tabular-nums; }
   .range-badges { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; margin-left: 8px; font-size: 12px; vertical-align: middle; }
+  .pager { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 13px; color: var(--text-2); }
+  .pager .btn { font-size: 13px; padding: 4px 12px; min-height: 30px; }
+  .pager-page { font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; }
 </style>
 </head>
 <body>
@@ -279,6 +282,13 @@
         <option value="SENT">Đã gửi Telegram</option>
         <option value="REJECTED">Bị AI từ chối</option>
         <option value="ALL">Tất cả</option>
+      </select>
+    </label>
+    <label class="field">Nguồn
+      <select id="f-origin">
+        <option value="ALL">Tất cả</option>
+        <option value="BOT">Bot thật</option>
+        <option value="BACKTEST">Bổ sung từ backtest</option>
       </select>
     </label>
     <div class="field">Đơn vị
@@ -344,6 +354,7 @@
           <h2>Báo cáo backtest</h2>
           <p class="note" id="bt-note">Đang tải báo cáo…</p>
         </div>
+        <div class="segmented" id="bt-symbol" role="group" aria-label="Tài sản" hidden></div>
       </div>
       <div id="bt-criteria"></div>
     </section>
@@ -365,9 +376,6 @@
           </label>
           <label class="field">Đến ngày
             <input type="date" id="bt-f-to">
-          </label>
-          <label class="field" id="bt-f-symbol-field">Tài sản
-            <select id="bt-f-symbol"></select>
           </label>
           <label class="field">Khung
             <select id="bt-f-timeframe"></select>
@@ -413,6 +421,7 @@
           </div>
         </div>
         <div class="table-wrap" id="bt-range-table"></div>
+        <div class="pager" id="bt-range-pager" hidden></div>
         <p class="note" id="bt-range-foot"></p>
       </section>
     </div>
@@ -460,10 +469,16 @@
     // Kiểm tra tín hiệu theo ngày: { day, loading, result, error }
     dayCheck: { day: null },
     // Bộ lọc mục "Thống kê theo khoảng thời gian"; from/to ('YYYY-MM-DD', giờ VN) chỉ dùng khi preset = 'custom'
-    btRange: { preset: '1y', from: '', to: '', symbol: 'ALL', timeframe: 'ALL', strategy: 'ALL', show: 'ALL', sort: 'total' },
+    // Tài sản đang xem ở tab báo cáo (mọi mục cùng một tài sản); null = tài sản đầu tiên của báo cáo
+    btSymbol: null,
+    btRange: { preset: '1y', from: '', to: '', timeframe: 'ALL', strategy: 'ALL', show: 'ALL', sort: 'total' },
     // Các dòng vẽ trên biểu đồ so sánh, theo vị trí cố định để mỗi dòng giữ màu khi bỏ chọn dòng khác; null = chưa chọn lần nào
     btCompare: null,
-    filters: { range: 'ALL', symbol: 'ALL', strategy: 'ALL', timeframe: 'ALL', sent: 'SENT', unit: 'USD' },
+    // Phân trang bảng xếp hạng phương pháp; về trang 1 khi đổi bộ lọc hoặc cách xếp hạng
+    btRangePage: 1,
+    btRangePageSize: 20,
+    // origin: tín hiệu bot thật hoặc bổ sung bằng npm run backtest:day (quy trình bot, chưa qua AI)
+    filters: { range: 'ALL', symbol: 'ALL', strategy: 'ALL', timeframe: 'ALL', sent: 'SENT', origin: 'ALL', unit: 'USD' },
     sizes: {},
   };
 
@@ -474,8 +489,11 @@
     if (saved.view === 'backtest') state.view = 'backtest';
     if (saved.btTimeframe) state.btTimeframe = saved.btTimeframe;
     if (saved.btMetric === 'r') state.btMetric = 'r';
+    if (typeof saved.btSymbol === 'string') state.btSymbol = saved.btSymbol;
     Object.assign(state.btRange, saved.btRange || {});
+    delete state.btRange.symbol;
     if (Array.isArray(saved.btCompare)) state.btCompare = saved.btCompare.slice(0, 5);
+    if ([10, 20, 50].includes(saved.btRangePageSize)) state.btRangePageSize = saved.btRangePageSize;
   } catch (e) {}
   // Link /dashboard#backtest mở thẳng tab báo cáo
   if (location.hash === '#backtest') state.view = 'backtest';
@@ -485,7 +503,7 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         filters: state.filters, sizes: state.sizes, view: state.view, btTimeframe: state.btTimeframe, btMetric: state.btMetric,
-        btRange: state.btRange, btCompare: state.btCompare,
+        btSymbol: state.btSymbol, btRange: state.btRange, btCompare: state.btCompare, btRangePageSize: state.btRangePageSize,
       }));
     } catch (e) {}
   }
@@ -558,7 +576,8 @@
       (f.symbol === 'ALL' || r.symbol === f.symbol) &&
       (f.strategy === 'ALL' || r.strategy === f.strategy) &&
       (f.timeframe === 'ALL' || tfOf(r) === f.timeframe) &&
-      (f.sent === 'ALL' || (f.sent === 'SENT' ? r.sent : !r.sent)));
+      (f.sent === 'ALL' || (f.sent === 'SENT' ? r.sent : !r.sent)) &&
+      (f.origin === 'ALL' || (f.origin === 'BACKTEST') === (r.origin === 'backtest')));
   }
 
   function summarize(list) {
@@ -595,6 +614,7 @@
     const f = state.filters;
     $('#f-range').value = f.range;
     $('#f-sent').value = f.sent;
+    $('#f-origin').value = f.origin;
     f.symbol = syncOptions($('#f-symbol'), [
       { value: 'ALL', label: 'Tất cả' },
       ...assets().map((a) => ({ value: a.symbol, label: a.displayName })),
@@ -641,7 +661,7 @@
   }
 
   function bindControls() {
-    for (const [id, key] of [['#f-range', 'range'], ['#f-symbol', 'symbol'], ['#f-strategy', 'strategy'], ['#f-timeframe', 'timeframe'], ['#f-sent', 'sent']]) {
+    for (const [id, key] of [['#f-range', 'range'], ['#f-symbol', 'symbol'], ['#f-strategy', 'strategy'], ['#f-timeframe', 'timeframe'], ['#f-sent', 'sent'], ['#f-origin', 'origin']]) {
       $(id).addEventListener('change', (e) => {
         state.filters[key] = e.target.value;
         persist();
@@ -669,6 +689,7 @@
     // Bộ lọc backtest theo khoảng thời gian
     const changeRange = (patch) => {
       Object.assign(state.btRange, patch);
+      state.btRangePage = 1;
       persist();
       renderRange();
     };
@@ -681,7 +702,7 @@
     for (const id of ['#bt-f-from', '#bt-f-to']) {
       $(id).addEventListener('change', () => changeRange({ preset: 'custom', from: $('#bt-f-from').value, to: $('#bt-f-to').value }));
     }
-    for (const [id, key] of [['#bt-f-symbol', 'symbol'], ['#bt-f-timeframe', 'timeframe'], ['#bt-f-strategy', 'strategy'], ['#bt-f-show', 'show']]) {
+    for (const [id, key] of [['#bt-f-timeframe', 'timeframe'], ['#bt-f-strategy', 'strategy'], ['#bt-f-show', 'show']]) {
       $(id).addEventListener('change', (e) => changeRange({ [key]: e.target.value }));
     }
     for (const btn of document.querySelectorAll('#bt-f-sort button')) {
@@ -996,6 +1017,9 @@
 
   // ---------- Danh sách tín hiệu ----------
   function aiLabel(r) {
+    if (r.origin === 'backtest') {
+      return el('span', { class: 'tag', title: 'Bổ sung bằng npm run backtest:day: tín hiệu quy trình bot sẽ phát, chưa qua AI và chặn tin tức' }, 'backtest');
+    }
     if (!r.aiMode) return 'Tắt';
     if (r.aiMode === 'ERROR_FALLBACK') return 'AI lỗi, tự duyệt';
     if (r.aiMode === 'TECHNICAL_FALLBACK') return 'Không';
@@ -1041,7 +1065,7 @@
           el('span', { class: signClass(v), title: r.status === 'OPEN' ? 'Tạm tính theo giá đóng cửa nến gần nhất' : null },
             `${r.status === 'OPEN' ? '~' : ''}${fmtValue(v)}`),
           state.filters.unit === 'USD' ? el('span', { class: 'tag' }, `${sign(r.r)}${abs2(r.r)}R`) : null),
-        el('td', {}, aiLabel(r), r.sent && !r.delivered ? el('span', { class: 'tag' }, 'gửi lỗi') : null));
+        el('td', {}, aiLabel(r), r.sent && !r.delivered && r.origin !== 'backtest' ? el('span', { class: 'tag' }, 'gửi lỗi') : null));
     });
 
     host.replaceChildren(el('table', {}, el('thead', {}, head), el('tbody', {}, rows)));
@@ -1106,6 +1130,53 @@
     return `PF < ${criteria.minProfitFactor}`;
   }
 
+  // ---------- Tài sản đang xem ở tab báo cáo ----------
+  // Tài sản có trong báo cáo tổng hợp và theo tháng, theo thứ tự của báo cáo
+  function btSymbols() {
+    const bt = state.backtest;
+    const names = new Map();
+    for (const r of [...((bt && bt.report && bt.report.results) || []), ...((bt && bt.monthly && bt.monthly.results) || [])]) {
+      if (!names.get(r.symbol)) names.set(r.symbol, r.displayName || null);
+    }
+    return [...names].map(([symbol, displayName]) => ({ symbol, label: displayName || symbol }));
+  }
+
+  // Lựa chọn đã lưu nếu báo cáo còn tài sản đó, không thì tài sản đầu tiên; null khi chưa có báo cáo
+  function btSymbol() {
+    const list = btSymbols();
+    return list.some((s) => s.symbol === state.btSymbol) ? state.btSymbol : list.length ? list[0].symbol : null;
+  }
+  const ofBtSymbol = (res) => { const sym = btSymbol(); return !sym || res.symbol === sym; };
+
+  function renderSymbolPicker() {
+    const host = $('#bt-symbol');
+    const list = btSymbols();
+    const current = btSymbol();
+    host.hidden = list.length < 2;
+    host.replaceChildren(...list.map(({ symbol, label }) => {
+      const b = el('button', { type: 'button', 'aria-pressed': String(symbol === current) }, label);
+      b.addEventListener('click', () => {
+        if (symbol === current) return;
+        state.btSymbol = symbol;
+        // Dòng so sánh và trang của bảng xếp hạng là của tài sản trước
+        state.btCompare = null;
+        state.btRangePage = 1;
+        persist();
+        renderBacktestTab();
+      });
+      return b;
+    }));
+  }
+
+  function renderBacktestTab() {
+    renderSymbolPicker();
+    renderBacktest();
+    renderRange();
+    renderMonthly();
+    renderDaily();
+    renderDayCheck();
+  }
+
   function renderBacktest() {
     const host = $('#bt-body');
     const bt = state.backtest;
@@ -1126,7 +1197,7 @@
     }
 
     const c = report.criteria;
-    $('#bt-note').textContent = `Tạo lúc ${fmtTime(report.generatedAt)} (mất ${report.durationSec} giây) · dữ liệu Vàng thật từ TradingView` +
+    $('#bt-note').textContent = `Tạo lúc ${fmtTime(report.generatedAt)} (mất ${report.durationSec} giây) · dữ liệu thật từ TradingView` +
       `${bt.storage === 'postgres' ? ' · lưu trong Postgres' : ''}${running}`;
     $('#bt-criteria').replaceChildren(
       el('p', { class: 'note' }, 'Một phương pháp "đạt chuẩn" khi thỏa cả 4 tiêu chí (đặt trước khi xem kết quả):'),
@@ -1137,7 +1208,7 @@
         el('li', {}, `Profit factor (tổng lãi / tổng lỗ) ≥ ${c.minProfitFactor}`)));
 
     const blocks = [];
-    for (const symbol of [...new Set(report.results.map((r) => r.symbol))]) {
+    for (const symbol of [...new Set(report.results.filter(ofBtSymbol).map((r) => r.symbol))]) {
       const results = report.results.filter((r) => r.symbol === symbol && !r.error).sort((a, b) => tfSort(a.timeframe, b.timeframe));
       const errors = report.results.filter((r) => r.symbol === symbol && r.error);
       const name = (results[0] && results[0].displayName) || symbol;
@@ -1294,7 +1365,13 @@
     const sameKeys = (a, b) => (a || []).join(',') === (b || []).join(',');
 
     const monthLabel = (key) => `T${Number(key.slice(5))}`;
-    host.replaceChildren(...m.results.map((res) => {
+    const results = m.results.filter(ofBtSymbol);
+    if (results.length === 0) {
+      host.replaceChildren(el('section', { class: 'card' }, el('h2', {}, `Theo tháng ${m.year}`),
+        el('div', { class: 'empty' }, 'Báo cáo theo tháng năm này chưa có tài sản đang chọn.')));
+      return;
+    }
+    host.replaceChildren(...results.map((res) => {
       const name = res.displayName || res.symbol;
       const timeframes = res.timeframes || [];
       const errors = timeframes.filter((t) => t.error);
@@ -1433,7 +1510,7 @@
     const month = state.btDayMonth;
     const days = daysOf(month, vnDayKey(m.generatedAt));
 
-    host.replaceChildren(...m.results.filter((res) => res.rows && res.rows.length > 0).map((res) => {
+    host.replaceChildren(...m.results.filter((res) => ofBtSymbol(res) && res.rows && res.rows.length > 0).map((res) => {
       const head = el('div', { class: 'card-head' },
         el('div', {},
           el('h2', {}, `${res.displayName || res.symbol}: theo ngày`),
@@ -1599,7 +1676,7 @@
     let body = null;
     if (dc.loading) body = el('div', { class: 'empty' }, `Đang chạy các phương pháp cho ngày ${fmtFullDay(dc.day)}… (tải dữ liệu mất khoảng 10–20 giây)`);
     else if (dc.error) body = el('div', { class: 'empty' }, `Không kiểm tra được: ${dc.error}`);
-    else if (dc.result) body = dc.result.results.flatMap(renderDayResult);
+    else if (dc.result) body = dc.result.results.filter(ofBtSymbol).flatMap(renderDayResult);
 
     $('#bt-daycheck').replaceChildren(el('section', { class: 'card' },
       el('div', { class: 'card-head' },
@@ -1617,6 +1694,7 @@
 
   // ---------- Backtest theo khoảng thời gian ----------
   const COMPARE_MAX = 5;
+  const RANGE_PAGE_SIZES = [10, 20, 50];
   // Dưới số lệnh này trong khoảng: chưa đủ để kết luận, hiện màu trung tính và xếp sau
   const RANGE_FEW = 30;
   const COMBINED_KEY = '__combined';
@@ -1764,12 +1842,51 @@
     renderRange();
   }
 
-  function renderRangeTable(rows, slots, multiSymbol) {
+  // Thanh phân trang của bảng xếp hạng: khoảng dòng đang xem, Trước / Sau, số dòng mỗi trang
+  function renderRangePager(total, pages) {
+    const host = $('#bt-range-pager');
+    host.hidden = total <= RANGE_PAGE_SIZES[0];
+    if (host.hidden) return;
+    const size = state.btRangePageSize;
+    const page = state.btRangePage;
+    const goTo = (n) => {
+      state.btRangePage = n;
+      renderRange();
+      $('#bt-range-table-card').scrollIntoView({ block: 'nearest' });
+    };
+    const prev = el('button', { type: 'button', class: 'btn', 'aria-label': 'Trang trước' }, '‹ Trước');
+    const next = el('button', { type: 'button', class: 'btn', 'aria-label': 'Trang sau' }, 'Sau ›');
+    prev.disabled = page <= 1;
+    next.disabled = page >= pages;
+    prev.addEventListener('click', () => goTo(page - 1));
+    next.addEventListener('click', () => goTo(page + 1));
+    const sizeSelect = el('select', { 'aria-label': 'Số dòng mỗi trang' },
+      ...RANGE_PAGE_SIZES.map((n) => el('option', { value: String(n) }, `${n} dòng / trang`)));
+    sizeSelect.value = String(size);
+    sizeSelect.addEventListener('change', () => {
+      // Giữ dòng đầu của trang đang xem trong trang mới
+      const first = (page - 1) * size;
+      state.btRangePageSize = Number(sizeSelect.value);
+      state.btRangePage = Math.floor(first / state.btRangePageSize) + 1;
+      persist();
+      renderRange();
+    });
+    host.replaceChildren(
+      el('span', {}, `Dòng ${(page - 1) * size + 1}–${Math.min(page * size, total)} / ${total}`),
+      el('div', { class: 'controls' }, prev, el('span', { class: 'pager-page', 'aria-live': 'polite' }, `Trang ${page} / ${pages}`), next, sizeSelect));
+  }
+
+  function renderRangeTable(rows, slots) {
     const host = $('#bt-range-table');
     if (rows.length === 0) {
       host.replaceChildren(el('div', { class: 'empty' }, 'Không có phương pháp nào khớp bộ lọc.'));
+      renderRangePager(0, 0);
       return;
     }
+    const size = state.btRangePageSize;
+    const pages = Math.ceil(rows.length / size);
+    state.btRangePage = Math.min(Math.max(1, state.btRangePage), pages);
+    const start = (state.btRangePage - 1) * size;
     const enough = (r) => r.st.trades >= RANGE_FEW;
     // Thang đo thanh chỉ tính các dòng đủ lệnh để một dòng ít lệnh không làm các thanh khác bé lại
     const maxAbs = Math.max(0.0001, ...rows.filter(enough).map((r) => Math.abs(r.st.total)));
@@ -1781,7 +1898,8 @@
       el('th', {}, 'Khung'),
       ...['Lệnh', 'Thắng', 'R/lệnh', 'Tổng R', 'PF', 'Sụt max'].map((h) => el('th', { class: 'num' }, h)),
       el('th', { class: 'num', title: 'R/lệnh của các lệnh MUA / BÁN' }, 'MUA / BÁN'));
-    const body = rows.map((r, i) => {
+    const body = rows.slice(start, start + size).map((r, k) => {
+      const i = start + k;
       const slot = slots.indexOf(r.id);
       const ok = enough(r);
       const st = r.st;
@@ -1794,7 +1912,6 @@
           box, slot >= 0 ? el('i', { class: 'line-key', style: `background:var(--series-${slot + 1})` }) : null)),
         el('td', { class: 'num rank' }, ok ? String(i + 1) : '—'),
         el('td', { class: 'name-cell' }, r.label,
-          multiSymbol ? el('span', { class: 'tag' }, r.res.displayName || r.res.symbol) : null,
           r.pass || r.on ? el('span', { class: 'range-badges' },
             r.pass ? el('span', { class: 'status tp', title: 'Đạt chuẩn khi đánh giá trên toàn bộ dữ liệu của báo cáo' },
               el('i', { 'aria-hidden': 'true' }, '✓'), 'Đạt chuẩn') : null,
@@ -1812,9 +1929,10 @@
           el('span', { class: ok ? signClass(st.sell.avg) : 'muted' }, st.sell.trades ? fmtR(st.sell.avg) : '—')));
     });
     host.replaceChildren(el('table', {}, el('thead', {}, head), el('tbody', {}, body)));
+    renderRangePager(rows.length, pages);
   }
 
-  function renderRangeChart(rows, slots, fromMs, toMs, multiSymbol) {
+  function renderRangeChart(rows, slots, fromMs, toMs) {
     const host = $('#bt-range-chart');
     const legend = $('#bt-range-legend');
     host.replaceChildren();
@@ -1836,8 +1954,7 @@
         cum += net;
         points.push({ t: minute * 60000, v: cum });
       }
-      const asset = multiSymbol ? ` ${(row.res.displayName || row.res.symbol).split(' (')[0]}` : '';
-      return { label: `${row.label}${asset} · ${row.res.timeframe}`, color: `var(--series-${k + 1})`, points, last: cum, log: row.log };
+      return { label: `${row.label} · ${row.res.timeframe}`, color: `var(--series-${k + 1})`, points, last: cum, log: row.log };
     });
     const times = [...new Set([start, ...series.flatMap((s) => s.points.slice(1).map((p) => p.t)), end])].sort((a, b) => a - b);
 
@@ -1871,7 +1988,7 @@
       $('#bt-range-chart-card').hidden = !on;
       $('#bt-range-table-card').hidden = !on;
     };
-    const all = report.results.filter((r) => !r.error && r.strategies);
+    const all = report.results.filter((r) => !r.error && r.strategies && ofBtSymbol(r));
     if (!hasTradeLog(report) || all.length === 0) {
       $('#bt-range-note').textContent = '';
       $('#bt-range-filters').hidden = true;
@@ -1888,13 +2005,7 @@
 
     // Bộ lọc
     const f = state.btRange;
-    const symbols = [...new Set(all.map((r) => r.symbol))];
-    f.symbol = syncOptions($('#bt-f-symbol'), [
-      { value: 'ALL', label: 'Tất cả' },
-      ...symbols.map((s) => ({ value: s, label: all.find((r) => r.symbol === s).displayName || s })),
-    ], f.symbol);
-    $('#bt-f-symbol-field').hidden = symbols.length < 2;
-    const results = all.filter((r) => f.symbol === 'ALL' || r.symbol === f.symbol);
+    const results = all;
     f.timeframe = syncOptions($('#bt-f-timeframe'), [
       { value: 'ALL', label: 'Tất cả' },
       ...[...new Set(results.map((r) => r.timeframe))].sort(tfSort).map((t) => ({ value: t, label: t })),
@@ -1945,9 +2056,7 @@
       (report.history ? `cộng dồn qua ${report.history.runs} lần tạo báo cáo lưu trong Postgres, lần gần nhất lúc ${fmtTime(report.generatedAt)}, `
         : `của báo cáo backtest tạo lúc ${fmtTime(report.generatedAt)}, `) +
       `dữ liệu tới ${fmtDate(Math.max(...results.map(lastEntryOf)))}`;
-    const multiSymbol = symbols.length > 1 && f.symbol === 'ALL';
-    const since = (list) => list.map((r) =>
-      `${multiSymbol ? `${(r.displayName || r.symbol).split(' (')[0]} ` : ''}${r.timeframe} từ ${fmtDate(firstEntryOf(r))}`).join(', ');
+    const since = (list) => list.map((r) => `${r.timeframe} từ ${fmtDate(firstEntryOf(r))}`).join(', ');
     message.replaceChildren(...[
       noData.length ? el('p', { class: 'bt-info' }, `Không có dữ liệu trong khoảng này: ${since(noData)} (giới hạn lịch sử TradingView).`) : null,
       partial.length ? el('p', { class: 'bt-info' }, `Chỉ có dữ liệu một phần khoảng này: ${since(partial)}.`) : null,
@@ -1968,8 +2077,8 @@
       `Số xám: dưới ${RANGE_FEW} lệnh trong khoảng, chưa đủ để kết luận. Lệnh tính theo thời điểm vào lệnh (giờ VN), lệnh vào gần cuối khoảng có thể đóng sau ngày kết thúc; ` +
       'lệnh chưa có kết quả ở cuối dữ liệu không được tính. "Đạt chuẩn" là đánh giá trên toàn bộ dữ liệu của báo cáo (cần đối chứng ngẫu nhiên nên không tính lại theo khoảng). ' +
       'Thắng = TP1 / (TP1 + SL), R sau chi phí, PF = tổng lãi / tổng lỗ, sụt max = mức giảm lớn nhất của R tích lũy trong khoảng.';
-    renderRangeTable(rows, slots, multiSymbol);
-    renderRangeChart(rows, slots, fromMs, toMs, multiSymbol);
+    renderRangeTable(rows, slots);
+    renderRangeChart(rows, slots, fromMs, toMs);
   }
 
   // ---------- Lịch tin tức ----------
@@ -2072,10 +2181,7 @@
     renderNews();
     if (backtest.status === 'fulfilled' && backtest.value) {
       state.backtest = backtest.value;
-      renderBacktest();
-      renderRange();
-      renderMonthly();
-      renderDaily();
+      renderBacktestTab();
     }
     document.body.classList.remove('loading');
   }

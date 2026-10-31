@@ -22,6 +22,8 @@ const { saveRunAndClose } = require('../src/backtest/store');
 function parseArgs(argv) {
   const args = { symbols: [], year: Number(dayKey(Date.now()).slice(0, 4)), days: null };
   for (let i = 0; i < argv.length; i++) {
+    // pnpm truyền nguyên dấu "--" của "pnpm run backtest:monthly -- --year 2025" vào script
+    if (argv[i] === '--') continue;
     // --days [tháng 1-12]: in thêm bảng theo ngày của tháng đó, không ghi tháng thì lấy tháng gần nhất (0)
     if (argv[i] === '--days') {
       args.days = /^\d{1,2}$/.test(argv[i + 1] || '') ? Number(argv[++i]) : 0;

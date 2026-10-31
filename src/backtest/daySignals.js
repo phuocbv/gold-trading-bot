@@ -91,6 +91,8 @@ async function daySignalsFor(symbol, plan, day) {
       const inDay = (t) => t.time + tfMs >= start && t.time + tfMs < end;
       const toSignal = (t) => ({
         time: new Date(t.time + tfMs).toISOString(),
+        // Giờ mở của nến tín hiệu, cùng mốc bot thật dùng làm mã tín hiệu
+        candleTime: new Date(t.time).toISOString(),
         strategy: t.strategy,
         action: t.action,
         score: t.score,
@@ -100,6 +102,8 @@ async function daySignalsFor(symbol, plan, day) {
         outcome: t.outcome,
         open: t.open,
         exitTime: new Date(t.exitTime).toISOString(),
+        exitPrice: round(t.exitPrice),
+        bars: t.bars,
         r: round(t.r),
         net: round(t.net),
       });
@@ -140,9 +144,10 @@ async function daySignalsFor(symbol, plan, day) {
     }
   }
 
-  // Tín hiệu bot thật đã ghi nhận (gồm cả tín hiệu bị AI từ chối), theo ngày của thời điểm vào lệnh
+  // Tín hiệu bot thật đã ghi nhận (gồm cả tín hiệu bị AI từ chối, không gồm tín hiệu bổ sung từ backtest), theo ngày
+  // của thời điểm vào lệnh
   const live = listSignals()
-    .filter((rec) => rec.symbol === symbol && dayKey(Date.parse(rec.candleTime) + timeframeToMs(rec.timeframe || CONFIG.timeframe)) === day)
+    .filter((rec) => rec.origin !== 'backtest' && rec.symbol === symbol && dayKey(Date.parse(rec.candleTime) + timeframeToMs(rec.timeframe || CONFIG.timeframe)) === day)
     .map((rec) => ({
       time: new Date(Date.parse(rec.candleTime) + timeframeToMs(rec.timeframe || CONFIG.timeframe)).toISOString(),
       timeframe: rec.timeframe || CONFIG.timeframe,

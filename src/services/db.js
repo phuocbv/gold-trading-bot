@@ -20,8 +20,12 @@ CREATE TABLE IF NOT EXISTS signals (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS signals_candle_time_idx ON signals (candle_time);
+-- origin: 'bot' tín hiệu bot thật, 'backtest' tín hiệu bổ sung bằng npm run backtest:day (quy trình bot, chưa qua AI)
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'bot';
 
--- Mỗi lần tạo báo cáo backtest là một bản lưu riêng, không ghi đè (kind: 'report' tổng hợp, 'monthly' theo tháng của year)
+-- Mỗi lần tạo báo cáo backtest là một bản lưu riêng, không ghi đè (kind: 'report' tổng hợp, 'monthly' theo tháng của year).
+-- kind 'day' (npm run backtest:day) là kết quả kiểm tra một ngày của một tài sản: mỗi ngày mỗi tài sản chỉ một dòng,
+-- chạy lại thì thay bằng lần mới nhất
 CREATE TABLE IF NOT EXISTS backtest_runs (
   id BIGSERIAL PRIMARY KEY,
   kind TEXT NOT NULL,
@@ -31,6 +35,7 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
   payload JSONB NOT NULL,
   UNIQUE (kind, generated_at)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS backtest_runs_day_symbol_idx ON backtest_runs ((payload->>'day'), (payload->>'symbol')) WHERE kind = 'day';
 
 -- Từng lệnh backtest đã đóng của báo cáo tổng hợp, cộng dồn qua các lần chạy để thống kê được cả giai đoạn
 -- nguồn dữ liệu không còn trả về (TradingView ẩn danh chỉ có vài nghìn nến gần nhất).

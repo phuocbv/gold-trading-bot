@@ -92,6 +92,33 @@ async function saveRun(kind, report) {
 }
 
 /**
+ * Lưu kết quả kiểm tra tín hiệu theo ngày (npm run backtest:day): mỗi ngày mỗi tài sản một dòng (kind 'day'), chạy lại
+ * cùng ngày thì thay bằng kết quả mới nhất (lệnh còn mở ở lần chạy trước có thể đã có kết quả). Kết quả lỗi ở mọi khung
+ * không được lưu, và không ghi đè kết quả đã lưu có ít khung lỗi hơn (vd: TradingView lỗi tạm thời ở lần chạy lại).
+ * @param {Array<object>} results - Kết quả daySignalsFor của từng tài sản (hoặc { symbol, error })
+ * @param {object} meta - Thông tin chung lưu kèm (planSignature, horizonBars, cooldownBars)
+ * @returns {Promise<{saved: Array<string>, skipped: Array<string>}>} Tài sản đã lưu / bỏ qua
+ */
+async function saveDayChecks(results, meta) {
+  const usable = (res) => !res.error && (res.timeframes || []).some((t) => !t.error);
+  const saved = [];
+  const skipped = results.filter((res) => !usable(res)).map((res) => res.symbol);
+  await withTransaction(async (client) => {
+    for (const res of results.filter(usable)) {
+      const { rowCount } = await client.query(
+        `INSERT INTO backtest_runs (kind, generated_at, year, plan_signature, payload) VALUES ('day', $1, $2, $3, $4)
+         ON CONFLICT ((payload->>'day'), (payload->>'symbol')) WHERE kind = 'day'
+         DO UPDATE SET generated_at = EXCLUDED.generated_at, year = EXCLUDED.year, plan_signature = EXCLUDED.plan_signature, payload = EXCLUDED.payload
+         WHERE (SELECT count(*) FROM jsonb_array_elements(EXCLUDED.payload->'timeframes') t WHERE t ? 'error')
+            <= (SELECT count(*) FROM jsonb_array_elements(backtest_runs.payload->'timeframes') t WHERE t ? 'error')`,
+        [res.generatedAt, Number(res.day.slice(0, 4)), meta.planSignature || null, { ...meta, ...res }]);
+      (rowCount > 0 ? saved : skipped).push(res.symbol);
+    }
+  });
+  return { saved, skipped };
+}
+
+/**
  * Thông tin bản lưu mới nhất (kind, và năm với báo cáo theo tháng) để quyết định có cần tạo lại báo cáo không
  */
 async function latestRunMeta(kind, year = null) {
@@ -160,7 +187,7 @@ let cache = { id: undefined, report: null, years: [], monthly: new Map() };
  * @param {number|null} year - Năm của báo cáo theo tháng (null = năm gần nhất)
  */
 async function loadBacktest(year = null) {
-  const { rows: [head] } = await query('SELECT max(id) AS id FROM backtest_runs');
+  const { rows: [head] } = await query("SELECT max(id) AS id FROM backtest_runs WHERE kind IN ('report', 'monthly')");
   if (cache.id !== head.id) {
     const [report, years] = await Promise.all([
       latestReport(),
@@ -206,6 +233,7 @@ async function syncReportFiles() {
 module.exports = {
   saveRun,
   saveRunAndClose,
+  saveDayChecks,
   latestRunMeta,
   loadBacktest,
   syncReportFiles,

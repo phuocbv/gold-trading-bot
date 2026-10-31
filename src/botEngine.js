@@ -30,6 +30,8 @@ function cooldownsFor(timeframe) {
 // Khôi phục cooldown từ các tín hiệu đã lưu để khởi động lại bot không phát lại tín hiệu của nến cũ
 try {
   for (const rec of signalTracker.listSignals()) {
+    // Tín hiệu bổ sung từ backtest (npm run backtest:day) bot chưa từng phát nên không tính cooldown
+    if (rec.origin === 'backtest') continue;
     const cd = cooldownsFor(rec.timeframe || CONFIG.timeframe);
     (rec.sent ? cd.sent : cd.rejected).record(rec.symbol, rec.action, Date.parse(rec.candleTime));
   }
