@@ -113,6 +113,30 @@
   .segmented button:last-child { border-radius: 0 8px 8px 0; }
   .segmented button + button { margin-left: -1px; }
   .segmented button[aria-pressed="true"] { color: var(--text-1); font-weight: 600; background: var(--hover); }
+  /* Bộ lọc chọn nhiều giá trị: ô giống select, mở ra danh sách ô tích */
+  .multi { position: relative; }
+  .multi summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-size: 14px; color: var(--text-1); background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px 6px 12px; min-height: 34px; min-width: 130px; max-width: 240px; white-space: nowrap;
+  }
+  .multi summary::-webkit-details-marker { display: none; }
+  .multi summary span { overflow: hidden; text-overflow: ellipsis; }
+  /* Mũi tên giống của select bên cạnh */
+  .multi summary::after {
+    content: ""; flex: none; width: 6px; height: 6px; margin: -3px 2px 0 0;
+    border-right: 1.5px solid var(--text-1); border-bottom: 1.5px solid var(--text-1); transform: rotate(45deg);
+  }
+  .multi[open] summary::after { margin-top: 3px; transform: rotate(-135deg); }
+  .multi-menu {
+    position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; min-width: 100%; width: max-content; max-width: min(320px, 90vw);
+    max-height: 320px; overflow-y: auto; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  }
+  .multi-option { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 14px; color: var(--text-1); cursor: pointer; white-space: nowrap; }
+  .multi-option:hover { background: var(--hover); }
+  .multi-option input { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; accent-color: var(--text-1); cursor: pointer; }
+  .multi-option.all { border-bottom: 1px solid var(--grid); border-radius: 6px 6px 0 0; margin-bottom: 4px; }
   .sizes { display: flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 12px; align-items: flex-end; }
   .sizes .hint { font-size: 12px; color: var(--muted); padding-bottom: 8px; }
 
@@ -279,12 +303,12 @@
     <label class="field">Tài sản
       <select id="f-symbol"></select>
     </label>
-    <label class="field">Phương pháp
-      <select id="f-strategy"></select>
-    </label>
-    <label class="field">Khung
-      <select id="f-timeframe"></select>
-    </label>
+    <div class="field">Phương pháp
+      <details class="multi" id="f-strategy" data-label="Phương pháp"><summary></summary><div class="multi-menu"></div></details>
+    </div>
+    <div class="field">Khung
+      <details class="multi" id="f-timeframe" data-label="Khung"><summary></summary><div class="multi-menu"></div></details>
+    </div>
     <label class="field">Tín hiệu
       <select id="f-sent">
         <option value="SENT">Đã gửi Telegram</option>
@@ -385,12 +409,12 @@
           <label class="field">Đến ngày
             <input type="date" id="bt-f-to">
           </label>
-          <label class="field">Khung
-            <select id="bt-f-timeframe"></select>
-          </label>
-          <label class="field">Phương pháp
-            <select id="bt-f-strategy"></select>
-          </label>
+          <div class="field">Khung
+            <details class="multi" id="bt-f-timeframe" data-label="Khung"><summary></summary><div class="multi-menu"></div></details>
+          </div>
+          <div class="field">Phương pháp
+            <details class="multi" id="bt-f-strategy" data-label="Phương pháp"><summary></summary><div class="multi-menu"></div></details>
+          </div>
           <label class="field">Hiển thị
             <select id="bt-f-show">
               <option value="ALL">Tất cả phương pháp</option>
@@ -484,14 +508,15 @@
     // Bộ lọc mục "Thống kê theo khoảng thời gian"; from/to ('YYYY-MM-DD', giờ VN) chỉ dùng khi preset = 'custom'
     // Tài sản đang xem ở tab báo cáo (mọi mục cùng một tài sản); null = tài sản đầu tiên của báo cáo
     btSymbol: null,
-    btRange: { preset: '1y', from: '', to: '', timeframe: 'ALL', strategy: 'ALL', show: 'ALL', sort: 'total' },
+    // timeframe / strategy (ở đây và ở filters): các giá trị đang chọn, [] = tất cả
+    btRange: { preset: '1y', from: '', to: '', timeframe: [], strategy: [], show: 'ALL', sort: 'total' },
     // Các dòng vẽ trên biểu đồ so sánh, theo vị trí cố định để mỗi dòng giữ màu khi bỏ chọn dòng khác; null = chưa chọn lần nào
     btCompare: null,
     // Phân trang bảng xếp hạng phương pháp; về trang 1 khi đổi bộ lọc hoặc cách xếp hạng
     btRangePage: 1,
     btRangePageSize: 20,
     // origin: tín hiệu bot thật hoặc bổ sung bằng npm run backtest:day (quy trình bot, chưa qua AI)
-    filters: { range: 'ALL', symbol: 'ALL', strategy: 'ALL', timeframe: 'ALL', sent: 'SENT', origin: 'ALL', unit: 'USD' },
+    filters: { range: 'ALL', symbol: 'ALL', strategy: [], timeframe: [], sent: 'SENT', origin: 'ALL', unit: 'USD' },
     sizes: {},
   };
 
@@ -508,6 +533,12 @@
     if (Array.isArray(saved.btCompare)) state.btCompare = saved.btCompare.slice(0, 5);
     if ([10, 20, 50].includes(saved.btRangePageSize)) state.btRangePageSize = saved.btRangePageSize;
   } catch (e) {}
+  // Bản lưu cũ chỉ có một giá trị hoặc 'ALL'
+  const asList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : typeof v === 'string' && v !== 'ALL' ? [v] : []);
+  for (const f of [state.filters, state.btRange]) {
+    f.strategy = asList(f.strategy);
+    f.timeframe = asList(f.timeframe);
+  }
   // Link /dashboard#backtest mở thẳng tab báo cáo
   if (location.hash === '#backtest') state.view = 'backtest';
   else if (location.hash === '#live') state.view = 'live';
@@ -580,6 +611,8 @@
   const sum = (arr) => arr.reduce((a, b) => a + b, 0);
   const tfOf = (rec) => rec.timeframe || state.data.timeframe;
   const tfSort = (a, b) => minutesOf(a) - minutesOf(b);
+  // Bộ lọc chọn nhiều giá trị: không chọn gì là tất cả
+  const picked = (list, v) => list.length === 0 || list.includes(v);
 
   function filtered() {
     const f = state.filters;
@@ -587,8 +620,8 @@
     return state.data.records.filter((r) =>
       Date.parse(r.candleTime) >= since &&
       (f.symbol === 'ALL' || r.symbol === f.symbol) &&
-      (f.strategy === 'ALL' || r.strategy === f.strategy) &&
-      (f.timeframe === 'ALL' || tfOf(r) === f.timeframe) &&
+      picked(f.strategy, r.strategy) &&
+      picked(f.timeframe, tfOf(r)) &&
       (f.sent === 'ALL' || (f.sent === 'SENT' ? r.sent : !r.sent)) &&
       (f.origin === 'ALL' || (f.origin === 'BACKTEST') === (r.origin === 'backtest')));
   }
@@ -623,6 +656,51 @@
     return select.value;
   }
 
+  /**
+   * Bộ lọc chọn nhiều giá trị (details.multi): ô "Tất cả" rồi một ô tích cho mỗi lựa chọn. Chỉ dựng lại danh sách khi các
+   * lựa chọn đổi để menu đang mở không bị đóng khi trang tự làm mới. Trả về các giá trị đang chọn còn trong danh sách
+   * @param {string} unit - Đơn vị khi chọn nhiều, vd "3 khung"
+   */
+  function syncMulti(host, options, selected, unit) {
+    const menu = host.querySelector('.multi-menu');
+    const key = options.map((o) => o.value).join('|');
+    if (host.dataset.key !== key) {
+      host.dataset.key = key;
+      menu.replaceChildren(...[{ value: 'ALL', label: 'Tất cả' }, ...options].map((o) =>
+        el('label', { class: `multi-option${o.value === 'ALL' ? ' all' : ''}` }, el('input', { type: 'checkbox', value: o.value }), o.label)));
+    }
+    const chosen = options.filter((o) => selected.includes(o.value));
+    const current = chosen.map((o) => o.value);
+    for (const box of menu.querySelectorAll('input')) {
+      box.checked = box.value === 'ALL' ? current.length === 0 : current.includes(box.value);
+    }
+    const names = chosen.map((o) => o.label).join(', ');
+    const text = chosen.length === 0 ? 'Tất cả' : names.length <= 24 ? names : `${chosen.length} ${unit}`;
+    const summary = host.querySelector('summary');
+    summary.replaceChildren(el('span', {}, text));
+    summary.title = names;
+    summary.setAttribute('aria-label', `${host.dataset.label}: ${text}`);
+    return current;
+  }
+
+  // onChange nhận các giá trị đang tích ([] khi chọn "Tất cả")
+  function bindMulti(host, onChange) {
+    const menu = host.querySelector('.multi-menu');
+    menu.addEventListener('change', (e) => {
+      onChange(e.target.value === 'ALL' ? [] : [...menu.querySelectorAll('input:checked')].map((b) => b.value).filter((v) => v !== 'ALL'));
+    });
+    // Ô lọc nằm sát mép phải (màn hình hẹp): mở menu về bên trái để không tràn ra ngoài
+    host.addEventListener('toggle', () => {
+      if (!host.open) return;
+      menu.style.left = '';
+      menu.style.right = '';
+      if (menu.getBoundingClientRect().right > document.documentElement.clientWidth - 8) {
+        menu.style.left = 'auto';
+        menu.style.right = '0';
+      }
+    });
+  }
+
   function renderControls() {
     const f = state.filters;
     $('#f-range').value = f.range;
@@ -633,15 +711,9 @@
       ...assets().map((a) => ({ value: a.symbol, label: a.displayName })),
     ], f.symbol);
     const strategies = [...new Set([...(state.data.strategies || []), ...state.data.records.map((r) => r.strategy)])];
-    f.strategy = syncOptions($('#f-strategy'), [
-      { value: 'ALL', label: 'Tất cả' },
-      ...strategies.map((s) => ({ value: s, label: s })),
-    ], f.strategy);
+    f.strategy = syncMulti($('#f-strategy'), strategies.map((s) => ({ value: s, label: s })), f.strategy, 'phương pháp');
     const timeframes = [...new Set([...(state.data.timeframes || []), ...state.data.records.map(tfOf)])].sort(tfSort);
-    f.timeframe = syncOptions($('#f-timeframe'), [
-      { value: 'ALL', label: 'Tất cả' },
-      ...timeframes.map((t) => ({ value: t, label: t })),
-    ], f.timeframe);
+    f.timeframe = syncMulti($('#f-timeframe'), timeframes.map((t) => ({ value: t, label: t })), f.timeframe, 'khung');
     for (const btn of document.querySelectorAll('#f-unit button')) {
       btn.setAttribute('aria-pressed', String(btn.dataset.unit === f.unit));
     }
@@ -674,13 +746,31 @@
   }
 
   function bindControls() {
-    for (const [id, key] of [['#f-range', 'range'], ['#f-symbol', 'symbol'], ['#f-strategy', 'strategy'], ['#f-timeframe', 'timeframe'], ['#f-sent', 'sent'], ['#f-origin', 'origin']]) {
+    for (const [id, key] of [['#f-range', 'range'], ['#f-symbol', 'symbol'], ['#f-sent', 'sent'], ['#f-origin', 'origin']]) {
       $(id).addEventListener('change', (e) => {
         state.filters[key] = e.target.value;
         persist();
         render();
       });
     }
+    for (const key of ['strategy', 'timeframe']) {
+      bindMulti($(`#f-${key}`), (list) => {
+        state.filters[key] = list;
+        persist();
+        render();
+      });
+    }
+    // Bấm ra ngoài hoặc Esc thì đóng menu của bộ lọc chọn nhiều
+    document.addEventListener('click', (e) => {
+      for (const d of document.querySelectorAll('details.multi[open]')) if (!d.contains(e.target)) d.open = false;
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      for (const d of document.querySelectorAll('details.multi[open]')) {
+        d.open = false;
+        d.querySelector('summary').focus();
+      }
+    });
     for (const btn of document.querySelectorAll('#f-unit button')) {
       btn.addEventListener('click', () => {
         state.filters.unit = btn.dataset.unit;
@@ -715,8 +805,9 @@
     for (const id of ['#bt-f-from', '#bt-f-to']) {
       $(id).addEventListener('change', () => changeRange({ preset: 'custom', from: $('#bt-f-from').value, to: $('#bt-f-to').value }));
     }
-    for (const [id, key] of [['#bt-f-timeframe', 'timeframe'], ['#bt-f-strategy', 'strategy'], ['#bt-f-show', 'show']]) {
-      $(id).addEventListener('change', (e) => changeRange({ [key]: e.target.value }));
+    $('#bt-f-show').addEventListener('change', (e) => changeRange({ show: e.target.value }));
+    for (const key of ['timeframe', 'strategy']) {
+      bindMulti($(`#bt-f-${key}`), (list) => changeRange({ [key]: list }));
     }
     for (const btn of document.querySelectorAll('#bt-f-sort button')) {
       btn.addEventListener('click', () => changeRange({ sort: btn.dataset.sort }));
@@ -1810,7 +1901,7 @@
     const noData = [];
     const partial = [];
     for (const res of results) {
-      if (f.timeframe !== 'ALL' && res.timeframe !== f.timeframe) continue;
+      if (!picked(f.timeframe, res.timeframe)) continue;
       if (firstEntryOf(res) > toMs || lastEntryOf(res) < fromMs) {
         noData.push(res);
         continue;
@@ -1830,7 +1921,7 @@
         });
       }
       for (const e of entries) {
-        if (f.strategy !== 'ALL' && e.key !== f.strategy) continue;
+        if (!picked(f.strategy, e.key)) continue;
         if (f.show === 'ACTIVE' && !e.on) continue;
         if (f.show === 'PASS' && !e.s.pass) continue;
         const log = (e.s.log || []).filter((x) => x[0] >= fromMin && x[0] <= toMin);
@@ -2029,17 +2120,14 @@
     // Bộ lọc
     const f = state.btRange;
     const results = all;
-    f.timeframe = syncOptions($('#bt-f-timeframe'), [
-      { value: 'ALL', label: 'Tất cả' },
-      ...[...new Set(results.map((r) => r.timeframe))].sort(tfSort).map((t) => ({ value: t, label: t })),
-    ], f.timeframe);
+    f.timeframe = syncMulti($('#bt-f-timeframe'),
+      [...new Set(results.map((r) => r.timeframe))].sort(tfSort).map((t) => ({ value: t, label: t })), f.timeframe, 'khung');
     const strategies = new Map();
     for (const r of results) for (const s of r.strategies) if (!strategies.has(s.key)) strategies.set(s.key, s.name);
-    f.strategy = syncOptions($('#bt-f-strategy'), [
-      { value: 'ALL', label: 'Tất cả' },
+    f.strategy = syncMulti($('#bt-f-strategy'), [
       ...[...strategies].map(([value, label]) => ({ value, label })),
       ...(results.some((r) => r.combined && r.combined.keys.length > 1) ? [{ value: COMBINED_KEY, label: 'Gộp các phương pháp đang bật' }] : []),
-    ], f.strategy);
+    ], f.strategy, 'phương pháp');
     $('#bt-f-show').value = f.show;
     for (const btn of document.querySelectorAll('#bt-f-sort button')) {
       btn.setAttribute('aria-pressed', String(btn.dataset.sort === (SORTS[f.sort] ? f.sort : 'total')));
