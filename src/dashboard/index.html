@@ -1075,7 +1075,7 @@
         el('td', {}, el('span', { class: `status ${st.cls}` }, el('i', { 'aria-hidden': 'true' }, st.icon), st.label,
           r.status === 'OPEN' ? el('span', { class: 'tag', title: 'Số nến đã theo dõi / tối đa' }, `${r.barsHeld}/${state.data.horizonBars}`) : null)),
         el('td', { class: 'num' },
-          el('span', { class: signClass(v), title: r.status === 'OPEN' ? 'Tạm tính theo giá đóng cửa nến gần nhất' : null },
+          el('span', { class: signClass(v), title: r.status === 'OPEN' ? `Tạm tính theo giá lúc ${fmtTime(r.priceTime || r.lastCheckedTime)}` : null },
             `${r.status === 'OPEN' ? '~' : ''}${fmtValue(v)}`),
           state.filters.unit === 'USD' ? el('span', { class: 'tag' }, `${sign(r.r)}${abs2(r.r)}R`) : null),
         el('td', {}, aiLabel(r), r.sent && !r.delivered && r.origin !== 'backtest' ? el('span', { class: 'tag' }, 'gửi lỗi') : null));
@@ -1115,8 +1115,9 @@
       return `${t} ≈ ${hours >= 48 ? `${+(hours / 24).toFixed(1)} ngày` : `${+hours.toFixed(1)} giờ`}`;
     }).join(', ');
     $('#footnote').textContent =
-      'Cách tính: mỗi tín hiệu được theo dõi bằng các nến cùng khung, từ nến kế tiếp sau nến phát tín hiệu. Chạm TP1 là thắng, chạm SL là thua; ' +
-      'nếu cùng một nến chạm cả hai thì tính là thua. ' +
+      'Cách tính: mỗi tín hiệu được theo dõi từ nến kế tiếp sau nến phát tín hiệu. Chạm TP1 là thắng, chạm SL là thua; ' +
+      `khoảng mỗi phút bot kiểm tra giá bằng nến ${tfs[0]} và nến đang chạy nên lệnh ở mọi khung đóng ngay khi chạm, ` +
+      'nếu cùng một nến chạm cả hai thì tính là thua. Lãi/lỗ của lệnh đang mở tạm tính theo giá ở lần kiểm tra gần nhất. ' +
       `Sau ${d.horizonBars} nến của khung tương ứng (${horizonText}) chưa chạm thì chốt theo giá đóng cửa (Hết hạn). ` +
       'Tỉ lệ thắng = TP1 / (TP1 + SL). Lãi/lỗ USD = chênh lệch giá × khối lượng (Vàng: 1 lot = 100 oz); ' +
       '1R = khoảng cách Entry → SL. Chưa trừ spread và phí giao dịch.';

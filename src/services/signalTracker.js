@@ -39,9 +39,10 @@ let lastPulledAt = null;
 let lastPullMs = 0;
 
 // Mức tiến triển của một bản ghi để chọn bản mới hơn khi gộp: tín hiệu bot thật > tín hiệu bổ sung từ backtest,
-// rồi đã đóng lệnh > số nến đã theo dõi > đã gửi
+// rồi đã đóng lệnh > số nến đã theo dõi > đã kiểm tra bằng nến khung nhỏ tới đâu > đã gửi
 function progress(rec) {
-  return [rec.origin === 'backtest' ? 0 : 1, rec.status !== 'OPEN' ? 1 : 0, rec.barsHeld || 0, rec.sent ? 1 : 0, rec.delivered ? 1 : 0];
+  return [rec.origin === 'backtest' ? 0 : 1, rec.status !== 'OPEN' ? 1 : 0, rec.barsHeld || 0, Date.parse(rec.fineCheckedUntil) || 0,
+    rec.sent ? 1 : 0, rec.delivered ? 1 : 0];
 }
 
 function compareProgress(a, b) {
@@ -284,24 +285,60 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
   save([rec]);
 }
 
+function hasOpenSignals(symbol) {
+  return load().some((rec) => rec.symbol === symbol && rec.status === 'OPEN');
+}
+
+function closeTrade(rec, status, exitPrice, closedTime) {
+  rec.status = status;
+  rec.exitPrice = exitPrice;
+  rec.closedTime = new Date(closedTime).toISOString();
+  const r = rMultiple(rec, exitPrice);
+  console.log(`📒 [SignalTracker] ${rec.displayName} ${rec.action} (${rec.strategy} ${rec.timeframe || CONFIG.timeframe}) đóng lệnh: ${status} | ${r >= 0 ? '+' : ''}${r.toFixed(2)}R`);
+}
+
+// Giá tạm tính của lệnh đang mở; không ghi đè bằng giá cũ hơn (vd: nến khung lớn đóng sau khi đã có giá của nến khung nhỏ)
+function setPrice(rec, price, at) {
+  if (Date.parse(rec.priceTime) > at) return;
+  rec.lastPrice = price;
+  rec.priceTime = new Date(at).toISOString();
+}
+
+// Chạm TP1/SL thì đóng lệnh ngay tại mức đó (cùng nến chạm cả hai tính SL), không thì cập nhật giá tạm tính
+function checkFiner(rec, candle, closedAt) {
+  const hit = checkCandleHit(rec, candle);
+  if (hit) closeTrade(rec, hit, hit === 'SL' ? rec.stopLoss : rec.takeProfit, candle.date);
+  else setPrice(rec, candle.close, closedAt);
+}
+
 /**
  * Cập nhật các lệnh đang mở của một tài sản theo các nến đã đóng mới (chạm TP1 / SL / hết hạn)
  * Nguồn chính (MARKET_DATA_SOURCE) luôn được dùng để chấm, kể cả cho lệnh phát lúc đang dùng nguồn dự phòng,
  * vì người dùng đặt lệnh theo giá thật của tài sản. Nến từ nguồn dự phòng (vd: Binance PAXG thay cho OANDA XAU)
  * lệch giá vài đô nên chỉ dùng cho lệnh cùng luồng giá; lệnh khác nguồn chờ nguồn chính có lại, trừ khi
  * nguồn gốc mất liên tục quá thời gian theo dõi (vd: đã đổi TRADINGVIEW_SYMBOL) để lệnh không bị treo mãi.
+ *
+ * Với `finer` (khung nhỏ nhất bot đang quét), các nến này còn dùng để chấm sớm lệnh của khung lớn hơn, và nến đang chạy
+ * (`forming`) dùng cho mọi lệnh: lệnh đóng ngay khi giá chạm TP1/SL thay vì chờ nến khung của lệnh đóng, giá tạm tính
+ * cập nhật mỗi lượt quét. Số nến theo dõi và hết hạn vẫn tính theo nến khung của lệnh như backtest.
  * @param {string} symbol
  * @param {Array<object>} candles - Chỉ gồm các nến đã đóng, cũ nhất -> mới nhất
- * @param {object} [feed] - { source: marketData.source, isFallback: nến từ nguồn dự phòng, timeframe: khung của các nến, now }
+ * @param {object} [feed] - { source: marketData.source, isFallback: nến từ nguồn dự phòng, timeframe: khung của các nến, now,
+ *   finer: dùng các nến này cho cả lệnh khung lớn hơn, forming: nến đang chạy (chưa đóng) }
  */
-function updateOpenSignals(symbol, candles, { source, isFallback = true, timeframe = CONFIG.timeframe, now = Date.now() } = {}) {
+function updateOpenSignals(symbol, candles, { source, isFallback = true, timeframe = CONFIG.timeframe, now = Date.now(), finer = false, forming = null } = {}) {
   load();
   const changed = new Set();
+  const tfMs = timeframeToMs(timeframe);
 
   for (const rec of records) {
     if (rec.symbol !== symbol || rec.status !== 'OPEN') continue;
-    // Lệnh chỉ được chấm bằng nến cùng khung thời gian với lúc phát tín hiệu (thời gian theo dõi tính theo số nến của khung đó)
-    if ((rec.timeframe || CONFIG.timeframe) !== timeframe) continue;
+    const recTf = rec.timeframe || CONFIG.timeframe;
+    const recTfMs = timeframeToMs(recTf);
+    if (recTf !== timeframe) {
+      if (finer && recTfMs > tfMs) checkFinerCandles(rec, candles, forming, { source, isFallback, tfMs, recTfMs, now }, changed);
+      continue;
+    }
     if (isFallback && rec.source && source && feedKey(rec.source) !== feedKey(source)) {
       // Tính từ lúc bắt đầu mất nguồn (không phải lần cập nhật cuối) để khoảng nghỉ cuối tuần không bị tính là mất nguồn
       if (!rec.feedMissingSince) {
@@ -322,18 +359,20 @@ function updateOpenSignals(symbol, candles, { source, isFallback = true, timefra
 
       rec.barsHeld++;
       rec.lastCheckedTime = new Date(time).toISOString();
-      rec.lastPrice = candle.close;
+      setPrice(rec, candle.close, time + tfMs);
       changed.add(rec);
 
       const hit = checkCandleHit(rec, candle);
       if (hit || rec.barsHeld >= CONFIG.signalTrackHorizonBars) {
-        rec.status = hit || 'EXPIRED';
-        rec.exitPrice = hit === 'SL' ? rec.stopLoss : hit === 'TP' ? rec.takeProfit : candle.close;
-        rec.closedTime = rec.lastCheckedTime;
-        const r = rMultiple(rec, rec.exitPrice);
-        console.log(`📒 [SignalTracker] ${rec.displayName} ${rec.action} (${rec.strategy}) đóng lệnh: ${rec.status} | ${r >= 0 ? '+' : ''}${r.toFixed(2)}R`);
+        closeTrade(rec, hit || 'EXPIRED', hit === 'SL' ? rec.stopLoss : hit === 'TP' ? rec.takeProfit : candle.close, time);
         break;
       }
+    }
+
+    // Nến đang chạy: lệnh cùng khung được kiểm tra luôn, không chờ nến đóng
+    if (finer && forming && rec.status === 'OPEN' && new Date(forming.date).getTime() >= Date.parse(rec.lastCheckedTime) + tfMs) {
+      checkFiner(rec, forming, now);
+      changed.add(rec);
     }
   }
 
@@ -341,6 +380,28 @@ function updateOpenSignals(symbol, candles, { source, isFallback = true, timefra
   // Không có gì đổi nhưng còn bản ghi chưa lưu được vào Postgres: thử lại mỗi lượt quét
   else if (pendingIds.size > 0 || (dbEnabled() && !dbSynced)) persistToDb();
   else pullIfDue();
+}
+
+/**
+ * Chấm sớm một lệnh khung lớn bằng nến khung nhỏ hơn (đã đóng và đang chạy) từ chỗ chưa kiểm tra: sau phần đã chấm bằng
+ * nến khung của lệnh (lastCheckedTime) và phần đã chấm bằng nến khung nhỏ trước đó (fineCheckedUntil)
+ */
+function checkFinerCandles(rec, candles, forming, { source, isFallback, tfMs, recTfMs, now }, changed) {
+  // Chỉ dùng nến cùng luồng giá với lệnh; mất nguồn chính thì để phần chấm theo khung của lệnh xử lý như trước
+  if (isFallback && rec.source && source && feedKey(rec.source) !== feedKey(source)) return;
+  const from = Math.max(Date.parse(rec.lastCheckedTime) + recTfMs, Date.parse(rec.fineCheckedUntil) || 0);
+  for (const candle of candles) {
+    const time = new Date(candle.date).getTime();
+    if (time < from) continue;
+    rec.fineCheckedUntil = new Date(time + tfMs).toISOString();
+    checkFiner(rec, candle, time + tfMs);
+    changed.add(rec);
+    if (rec.status !== 'OPEN') return;
+  }
+  if (forming && new Date(forming.date).getTime() >= Math.max(from, Date.parse(rec.fineCheckedUntil) || 0)) {
+    checkFiner(rec, forming, now);
+    changed.add(rec);
+  }
 }
 
 /**
@@ -396,6 +457,7 @@ module.exports = {
   backfillSignals,
   flushSignals,
   recordSignal,
+  hasOpenSignals,
   updateOpenSignals,
   listSignals,
   describeAsset,

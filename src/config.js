@@ -80,6 +80,8 @@ const CONFIG = {
   signalDbPath: process.env.SIGNAL_DB_PATH || path.join(__dirname, '..', 'data', 'signals.json'),
   // Lệnh chưa chạm TP1/SL sau N nến thì chốt theo giá đóng cửa (giống horizon mặc định của backtest)
   signalTrackHorizonBars: parseInt(process.env.SIGNAL_TRACK_HORIZON_BARS || '48', 10),
+  // Lịch cập nhật lãi/lỗ và TP1/SL của lệnh đang mở (mặc định giây 30 của mỗi phút, lệch với lượt quét tín hiệu ở giây 0)
+  signalUpdateCron: process.env.SIGNAL_UPDATE_CRON || '30 * * * * *',
   // Tài khoản đăng nhập dashboard (/login); đặt cả hai thì phải đăng nhập mới xem được dashboard và API
   dashboardUsername: process.env.DASHBOARD_USERNAME || '',
   dashboardPassword: process.env.DASHBOARD_PASSWORD || '',

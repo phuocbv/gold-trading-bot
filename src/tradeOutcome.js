@@ -1,6 +1,8 @@
 /**
- * Quy tắc tính kết quả lệnh dùng chung cho backtest và theo dõi tín hiệu thật,
- * để thống kê trên dashboard khớp với cách backtest chấm điểm.
+ * Quy tắc tính kết quả lệnh dùng chung cho backtest và theo dõi tín hiệu thật.
+ * Backtest chấm bằng nến khung của lệnh; bot thật chấm thêm bằng nến khung nhỏ nhất và nến đang chạy nên lệnh khung lớn
+ * đóng ngay khi giá chạm TP1/SL. Hai bên chỉ khác khi một nến khung lớn chạm cả TP1 lẫn SL: backtest tính SL,
+ * bot thật tính theo mức chạm trước.
  */
 
 /**

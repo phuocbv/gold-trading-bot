@@ -9,6 +9,9 @@ const { getNewsBlackout, describeEvent } = require('./services/newsCalendar');
 
 // Kế hoạch chạy: khung thời gian -> các chiến lược (cấu hình STRATEGIES)
 const strategyPlan = getStrategyPlan();
+// Khung nhỏ nhất đang quét: nến của khung này (cả nến đang chạy) dùng để cập nhật lãi/lỗ và TP1/SL của mọi lệnh đang mở,
+// không chờ nến khung của lệnh đóng
+const trackingTimeframe = [...strategyPlan.keys()].sort((a, b) => timeframeToMs(a) - timeframeToMs(b))[0];
 
 // Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản + khung thời gian
 const lastAnalyzedCandle = new Map();
@@ -130,12 +133,8 @@ async function scanSingleSymbol(symbol, timeframe = CONFIG.timeframe, strategyLi
     return;
   }
 
-  // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó trên khung này theo các nến mới đóng
-  runSafely('SignalTracker', () => signalTracker.updateOpenSignals(symbol, marketData.candles, {
-    source: marketData.source,
-    isFallback: marketData.isFallback,
-    timeframe,
-  }));
+  // Cập nhật kết quả TP1/SL của các tín hiệu đã phát trước đó theo các nến mới đóng của khung này
+  trackOpenSignals(symbol, timeframe, rawData, marketData);
 
   // Mỗi nến đã đóng chỉ phân tích một lần (cron chạy dày hơn khung nến; cuối tuần thị trường Vàng đóng cửa)
   const lastClosed = marketData.candles[marketData.candles.length - 1];
@@ -248,6 +247,55 @@ async function scanSingleSymbol(symbol, timeframe = CONFIG.timeframe, strategyLi
 }
 
 /**
+ * Cập nhật lệnh đang mở theo nến vừa tải; nến khung nhỏ nhất (kể cả nến đang chạy) còn dùng cho lệnh của mọi khung lớn hơn.
+ * Trả về nến đang chạy (null nếu nến cuối đã đóng, vd thị trường nghỉ)
+ */
+function trackOpenSignals(symbol, timeframe, rawData, marketData) {
+  const tracking = timeframe === trackingTimeframe;
+  const forming = rawData.candles.length > marketData.candles.length ? rawData.candles[rawData.candles.length - 1] : null;
+  runSafely('SignalTracker', () => signalTracker.updateOpenSignals(symbol, marketData.candles, {
+    source: marketData.source,
+    isFallback: marketData.isFallback,
+    timeframe,
+    finer: tracking,
+    forming: tracking ? forming : null,
+  }));
+  return forming;
+}
+
+// Thị trường nghỉ (cuối tuần, ngày lễ): tạm thưa lịch cập nhật lệnh đang mở của tài sản đó để không tải dữ liệu mỗi phút
+const MARKET_IDLE_BACKOFF_MS = 15 * 60 * 1000;
+const idleUntil = new Map();
+let refreshingOpenSignals = false;
+
+/**
+ * Cập nhật lãi/lỗ tạm tính và TP1/SL của các lệnh đang mở theo giá mới nhất, chạy dày hơn lượt quét tín hiệu
+ * (SIGNAL_UPDATE_CRON); chỉ tải dữ liệu cho tài sản còn lệnh mở
+ */
+async function refreshOpenSignals() {
+  if (refreshingOpenSignals || !trackingTimeframe) return;
+  refreshingOpenSignals = true;
+  try {
+    for (const symbol of CONFIG.symbols || [CONFIG.symbol]) {
+      if (!signalTracker.hasOpenSignals(symbol) || Date.now() < (idleUntil.get(symbol) || 0)) continue;
+      try {
+        const rawData = await fetchCandles(symbol, trackingTimeframe, 14);
+        const marketData = rawData && getClosedCandles(rawData, trackingTimeframe);
+        if (!marketData || marketData.candles.length === 0) continue;
+        const forming = trackOpenSignals(symbol, trackingTimeframe, rawData, marketData);
+        // Không có nến đang chạy và nến cuối đã đóng quá một khung: thị trường đang nghỉ
+        const last = new Date(marketData.candles[marketData.candles.length - 1].date).getTime() + timeframeToMs(trackingTimeframe);
+        if (!forming && Date.now() - last > timeframeToMs(trackingTimeframe)) idleUntil.set(symbol, Date.now() + MARKET_IDLE_BACKOFF_MS);
+      } catch (err) {
+        console.error(`❌ [SignalTracker] Lỗi khi cập nhật lệnh đang mở ${symbol}:`, err.message);
+      }
+    }
+  } finally {
+    refreshingOpenSignals = false;
+  }
+}
+
+/**
  * Quét toàn bộ danh mục tài sản đã cấu hình, trên mọi khung thời gian có chiến lược
  */
 async function scanMarket(targetSymbol = null) {
@@ -293,6 +341,7 @@ async function runMarketBriefing(targetSymbol = null) {
 module.exports = {
   strategyPlan,
   scanMarket,
+  refreshOpenSignals,
   scanSingleSymbol,
   runMarketBriefing,
   renderScoreBar,

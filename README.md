@@ -24,6 +24,7 @@ Hệ thống tự động phân tích thị trường Vàng (XAU/USD) & Crypto (
 - Hỗ trợ quét đồng thời: **Vàng (XAU/USD)**, **Ethereum (ETH/USDT)**, **Bitcoin (BTC/USDT)**.
 - Kết nối trực tiếp **TradingView WebSocket Datafeed** (chuẩn 100% Forex) và **Binance Spot Datafeed** (lấy chính xác Taker Buy/Sell Volume để tính Order Flow Delta).
 - Hỗ trợ chế độ kiểm tra nhanh 1 lần: `node bot.js --once`.
+- Theo dõi kết quả tín hiệu (tab **Tín hiệu thực tế**): mỗi phút (`SIGNAL_UPDATE_CRON`), khi còn lệnh đang mở bot tải nến của khung nhỏ nhất đang chạy (vd 15m), kể cả nến chưa đóng, để cập nhật lãi/lỗ tạm tính và đóng lệnh ngay khi giá chạm TP1/SL, cho cả lệnh khung 1h/2h/4h/1D; thị trường nghỉ thì giãn ra 15 phút. Số nến theo dõi và hết hạn (`SIGNAL_TRACK_HORIZON_BARS`) vẫn tính theo nến khung của lệnh. So với backtest (chấm bằng nến khung của lệnh) chỉ khác khi một nến khung lớn chạm cả TP1 lẫn SL: backtest tính SL, bot thật tính theo mức chạm trước.
 
 ### 3. Chạy Nhiều Khung Thời Gian & Báo Cáo Backtest:
 - Mỗi phương pháp chạy ở khung riêng qua biến `STRATEGIES` (vd: `donchian-55@4h`). Mặc định: 6 phương pháp cũ ở `TIMEFRAME` (15m, đã tắt Order Flow), **Donchian Breakout (Turtle 55 + EMA200)** ở khung 1h, 2h, 4h, 1D và **Supertrend (10,3 + EMA200)** ở khung 1D.

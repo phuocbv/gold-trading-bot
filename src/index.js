@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const express = require('express');
 const CONFIG = require('./config');
-const { scanMarket, runMarketBriefing, strategyPlan } = require('./botEngine');
+const { scanMarket, refreshOpenSignals, runMarketBriefing, strategyPlan } = require('./botEngine');
 const { registerDashboard } = require('./dashboard/server');
 const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
 const { startReportJob, pendingReports } = require('./backtest/reportJob');
@@ -92,6 +92,11 @@ async function startBot() {
   // Đặt lịch quét định kỳ theo CRON
   cron.schedule(CONFIG.cronSchedule, () => {
     scanMarket();
+  });
+
+  // Cập nhật lãi/lỗ và TP1/SL của lệnh đang mở theo giá mới nhất, dày hơn lượt quét tín hiệu
+  cron.schedule(CONFIG.signalUpdateCron, () => {
+    refreshOpenSignals();
   });
 
   // Báo cáo đang có trong file JSON mà Postgres chưa có (lần đầu bật Postgres, hoặc lần tạo trước mất kết nối)
