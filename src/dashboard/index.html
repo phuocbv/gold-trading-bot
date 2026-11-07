@@ -184,11 +184,16 @@
   .tip .row span { color: var(--text-2); }
   .tip .closed { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--grid); color: var(--text-2); }
 
-  .table-wrap { overflow-x: auto; }
+  /* Bảng rộng hơn khung cuộn ngang và cuộn dọc trong khung riêng, tiêu đề dính trong khung đó.
+     Bảng vừa khung (.fit, do fitTables gắn) bỏ khung cuộn để tiêu đề dính ở mép trên màn hình khi cuộn trang */
+  .table-wrap { overflow: auto; max-height: 75vh; }
+  .table-wrap.fit { overflow: visible; max-height: none; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th {
     text-align: left; font-weight: 500; color: var(--text-2); white-space: nowrap;
-    padding: 8px 7px; border-bottom: 1px solid var(--axis);
+    padding: 8px 7px; position: sticky; top: 0; z-index: 1; background: var(--surface);
+    /* Viền của bảng border-collapse không đi theo ô sticky nên vẽ bằng bóng */
+    box-shadow: inset 0 -1px 0 var(--axis);
   }
   td { padding: 8px 7px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
   tbody tr:hover td { background: var(--hover); }
@@ -822,6 +827,7 @@
     $('#view-backtest').hidden = state.view !== 'backtest';
     // Biểu đồ đo theo chiều rộng thật: vẽ lại khi tab hiện ra
     if (state.view === 'backtest') renderRange();
+    fitTables();
   }
 
   // ---------- Tổng quan ----------
@@ -1966,6 +1972,7 @@
     const goTo = (n) => {
       state.btRangePage = n;
       renderRange();
+      $('#bt-range-table').scrollTop = 0;
       $('#bt-range-table-card').scrollIntoView({ block: 'nearest' });
     };
     const prev = el('button', { type: 'button', class: 'btn', 'aria-label': 'Trang trước' }, '‹ Trước');
@@ -1984,6 +1991,7 @@
       state.btRangePage = Math.floor(first / state.btRangePageSize) + 1;
       persist();
       renderRange();
+      $('#bt-range-table').scrollTop = 0;
     });
     host.replaceChildren(
       el('span', {}, `Dòng ${(page - 1) * size + 1}–${Math.min(page * size, total)} / ${total}`),
@@ -2297,12 +2305,25 @@
     document.body.classList.remove('loading');
   }
 
+  // Bảng vừa khung thì bỏ khung cuộn (.fit) để hàng tiêu đề dính theo cuộn trang
+  function fitTables() {
+    for (const wrap of document.querySelectorAll('.table-wrap')) {
+      const table = wrap.querySelector('table');
+      // Bảng trong tab đang ẩn chưa đo được: đo lại khi tab hiện ra
+      if (!table || !wrap.offsetWidth) continue;
+      wrap.classList.toggle('fit', table.offsetWidth <= wrap.offsetWidth);
+    }
+  }
+  // Đo lại mỗi khi bảng được vẽ lại
+  new MutationObserver(fitTables).observe($('main'), { childList: true, subtree: true });
+
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (state.data) renderEquity(filtered());
       if (state.view === 'backtest') renderRange();
+      fitTables();
     }, 150);
   });
 
