@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const express = require('express');
 const CONFIG = require('./config');
-const { scanMarket, refreshOpenSignals, runMarketBriefing, strategyPlan } = require('./botEngine');
+const { scanMarket, refreshOpenSignals, runMarketBriefing, strategyPlan, describeDashboardGroup } = require('./botEngine');
 const { registerDashboard } = require('./dashboard/server');
 const { refreshCalendar, checkNewsAlerts } = require('./services/newsCalendar');
 const { startReportJob, pendingReports } = require('./backtest/reportJob');
@@ -37,6 +37,7 @@ async function startBot() {
   for (const [timeframe, list] of strategyPlan) {
     console.log(`   [${timeframe}] ${list.map((s) => s.name.split(' (')[0]).join(', ')}`);
   }
+  console.log(`📒 Nhóm Telegram dashboard: ${describeDashboardGroup()}`);
   console.log('====================================================');
 
   // Kiểm tra kết nối Postgres, rồi nạp tín hiệu đã ghi nhận (có Postgres thì gộp với file JSON) trước lượt quét đầu tiên

@@ -56,6 +56,15 @@ const CONFIG = {
   // Cấu hình Telegram
   telegramToken: process.env.TELEGRAM_BOT_TOKEN,
   telegramChatId: process.env.TELEGRAM_CHAT_ID,
+  // Nhóm thứ hai (tùy chọn) chỉ nhận các lệnh đã qua AI và được ghi vào dashboard, để số tin khớp số lệnh trên dashboard.
+  // Bot phải là thành viên của nhóm; bỏ trống thì không gửi
+  telegramDashboardChatId: process.env.TELEGRAM_DASHBOARD_CHAT_ID || '',
+  // Phương pháp gửi vào nhóm dashboard: "tên" hoặc "tên@khung" cách nhau bởi dấu phẩy (cùng tên với STRATEGIES),
+  // thiếu "@khung" là mọi khung; bỏ trống thì gửi mọi phương pháp
+  telegramDashboardStrategies: parseList(process.env.TELEGRAM_DASHBOARD_STRATEGIES || '').map((entry) => {
+    const [key, tf] = entry.split('@');
+    return { key: key.trim().toLowerCase(), timeframe: tf ? tf.trim().toLowerCase() : null };
+  }),
   telegramApiBase: process.env.TELEGRAM_API_BASE || 'https://api.telegram.org',
 
   // Cấu hình AI (Gemini)

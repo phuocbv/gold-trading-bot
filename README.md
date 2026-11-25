@@ -120,6 +120,10 @@ Tạo file `.env` (hoặc sao chép từ `.env.example`):
 # Telegram
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
+# (Tùy chọn) Nhóm thứ hai chỉ nhận các lệnh được ghi vào dashboard
+TELEGRAM_DASHBOARD_CHAT_ID=your_dashboard_group_chat_id
+# (Tùy chọn) Phương pháp gửi vào nhóm dashboard: "tên" (mọi khung) hoặc "tên@khung"; bỏ trống = mọi phương pháp
+TELEGRAM_DASHBOARD_STRATEGIES=donchian-55@4h,donchian-55@1d,supertrend
 
 # Thị trường & Nguồn dữ liệu
 SYMBOL=XAU/USD

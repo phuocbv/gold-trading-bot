@@ -229,6 +229,8 @@ function flushSignals() {
  * Ghi nhận một tín hiệu vừa phát (hoặc bị AI từ chối) để theo dõi kết quả TP1/SL
  * @param {object} signal - Tín hiệu đã chấm điểm (có symbol, displayName, aiReview)
  * @param {object} meta - { candleTime, sent: đã qua bộ lọc AI, delivered: Telegram gửi thành công, source: nguồn dữ liệu nến }
+ * @returns {object|null} Bản ghi vừa thêm vào dashboard, hoặc bản ghi cũ vừa chuyển từ AI từ chối sang đã gửi;
+ *   null nếu không có gì mới (đã có tín hiệu cùng mã, vd khung khác cùng chiều trên nến cùng giờ mở)
  */
 function recordSignal(signal, { candleTime, sent, delivered, source }) {
   load();
@@ -250,8 +252,9 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
         aiConfidence: ai ? ai.confidence : null,
       });
       save([existing]);
+      return existing;
     }
-    return;
+    return null;
   }
 
   const signalTime = new Date(candleTime).toISOString();
@@ -283,6 +286,7 @@ function recordSignal(signal, { candleTime, sent, delivered, source }) {
   };
   records.push(rec);
   save([rec]);
+  return rec;
 }
 
 function hasOpenSignals(symbol) {

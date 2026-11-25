@@ -10,8 +10,10 @@ const httpsAgent = new https.Agent({
 
 /**
  * Gửi tin nhắn raw qua Telegram Bot API (có tự động retry và fallback)
+ * @param {string} text
+ * @param {object} [options] - { chatId: nhóm nhận (mặc định TELEGRAM_CHAT_ID), maxRetries }
  */
-async function sendRawMessage(text, maxRetries = 3) {
+async function sendRawMessage(text, { chatId = CONFIG.telegramChatId, maxRetries = 3 } = {}) {
   if (!CONFIG.telegramToken || CONFIG.telegramToken.includes('YOUR_TELEGRAM')) {
     console.log(`\n📢 [TELEGRAM PREVIEW - Chưa điền Telegram Token trong .env]\n${text}\n`);
     return false;
@@ -25,7 +27,7 @@ async function sendRawMessage(text, maxRetries = 3) {
       await axios.post(
         url,
         {
-          chat_id: CONFIG.telegramChatId,
+          chat_id: chatId,
           text: text,
           parse_mode: 'Markdown',
         },
@@ -45,7 +47,7 @@ async function sendRawMessage(text, maxRetries = 3) {
           await axios.post(
             url,
             {
-              chat_id: CONFIG.telegramChatId,
+              chat_id: chatId,
               text: text,
             },
             {
@@ -85,8 +87,9 @@ async function sendRawMessage(text, maxRetries = 3) {
  *   indicators: { rsi, atr, currentPrice, ema20, ema50, ema200, ... },
  *   aiReview?: { confidence, reasoning, trend, support, resistance }
  * }
+ * @param {object} [options] - { chatId: nhóm nhận, mặc định TELEGRAM_CHAT_ID }
  */
-async function sendTradeAlert(signal) {
+async function sendTradeAlert(signal, { chatId } = {}) {
   const isBuy = signal.action.toUpperCase() === 'BUY';
   const icon = isBuy ? '🟢 MUA (BUY)' : '🔴 BÁN (SELL)';
   const headerIcon = isBuy ? '🚀' : '🔻';
@@ -176,7 +179,7 @@ async function sendTradeAlert(signal) {
 
   msg += `\n⚠️ _Lưu ý: Luôn tuân thủ kỷ luật quản lý vốn tối đa 1-2% tài khoản cho mỗi lệnh._`;
 
-  return await sendRawMessage(msg);
+  return await sendRawMessage(msg, { chatId });
 }
 
 /**

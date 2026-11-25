@@ -1,6 +1,7 @@
 const CONFIG = require('./config');
 const { fetchCandles, getClosedCandles, timeframeToMs } = require('./services/marketData');
-const { evaluateAllStrategies, strategies, getStrategyPlan } = require('./strategies');
+const { evaluateAllStrategies, strategies, registry, getStrategyPlan } = require('./strategies');
+const { primaryStrategyName } = require('./tradeOutcome');
 const { getMinScore, SignalCooldown } = require('./signalFilter');
 const { validateTradeSignal, generateMarketDigest } = require('./ai/geminiAnalyzer');
 const { sendTradeAlert, sendMarketDigest } = require('./services/telegram');
@@ -12,6 +13,34 @@ const strategyPlan = getStrategyPlan();
 // Khung nhỏ nhất đang quét: nến của khung này (cả nến đang chạy) dùng để cập nhật lãi/lỗ và TP1/SL của mọi lệnh đang mở,
 // không chờ nến khung của lệnh đóng
 const trackingTimeframe = [...strategyPlan.keys()].sort((a, b) => timeframeToMs(a) - timeframeToMs(b))[0];
+
+// Phương pháp gửi vào nhóm Telegram dashboard (TELEGRAM_DASHBOARD_STRATEGIES), so theo tên phương pháp chính và khung
+// của lệnh như bộ lọc trên dashboard; null = mọi phương pháp
+const dashboardGroupRules = CONFIG.telegramDashboardStrategies.length === 0 ? null : CONFIG.telegramDashboardStrategies.flatMap(({ key, timeframe }) => {
+  if (!registry[key]) {
+    console.warn(`⚠️ [Telegram] TELEGRAM_DASHBOARD_STRATEGIES: không có phương pháp "${key}" (có: ${Object.keys(registry).join(', ')}), bỏ qua.`);
+    return [];
+  }
+  if (timeframe && !/^\d+[mhdw]$/.test(timeframe)) {
+    console.warn(`⚠️ [Telegram] TELEGRAM_DASHBOARD_STRATEGIES: khung "${timeframe}" của "${key}" không hợp lệ (vd: 15m, 1h, 4h), bỏ qua.`);
+    return [];
+  }
+  return [{ name: primaryStrategyName(registry[key].name), timeframe }];
+});
+
+function sendsToDashboardGroup(rec) {
+  return !dashboardGroupRules || dashboardGroupRules.some((r) => r.name === rec.strategy && (!r.timeframe || r.timeframe === rec.timeframe));
+}
+
+/**
+ * Mô tả nhóm Telegram dashboard cho log khởi động
+ */
+function describeDashboardGroup() {
+  if (!CONFIG.telegramDashboardChatId) return 'tắt (đặt TELEGRAM_DASHBOARD_CHAT_ID để bật)';
+  if (!dashboardGroupRules) return 'mọi phương pháp';
+  if (dashboardGroupRules.length === 0) return 'không phương pháp nào (TELEGRAM_DASHBOARD_STRATEGIES không hợp lệ)';
+  return dashboardGroupRules.map((r) => `${r.name}${r.timeframe ? ` @${r.timeframe}` : ' (mọi khung)'}`).join(', ');
+}
 
 // Thời điểm mở của nến đã đóng gần nhất đã được phân tích, theo từng tài sản + khung thời gian
 const lastAnalyzedCandle = new Map();
@@ -241,7 +270,13 @@ async function scanSingleSymbol(symbol, timeframe = CONFIG.timeframe, strategyLi
     // Ghi nhận cả tín hiệu bị AI từ chối để dashboard so sánh được hiệu quả của bộ lọc AI
     if (shouldSend || !rejectedCooldown.isCoolingDown(symbol, signal.action, candleTime)) {
       if (!shouldSend) rejectedCooldown.record(symbol, signal.action, candleTime);
-      runSafely('SignalTracker', () => signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered, source: marketData.source }));
+      const rec = runSafely('SignalTracker', () => signalTracker.recordSignal(signal, { candleTime, sent: shouldSend, delivered, source: marketData.source }));
+      // Nhóm dashboard chỉ nhận lệnh đã qua AI và thật sự được ghi vào dashboard (không gồm lệnh trùng mã với lệnh đã có),
+      // thuộc các phương pháp trong TELEGRAM_DASHBOARD_STRATEGIES
+      if (rec && rec.sent && CONFIG.telegramDashboardChatId && sendsToDashboardGroup(rec)) {
+        const ok = await sendTradeAlert(signal, { chatId: CONFIG.telegramDashboardChatId });
+        if (ok) console.log(`📒 Đã gửi lệnh ${rec.id} (${rec.timeframe}) vào nhóm Telegram dashboard.`);
+      }
     }
   }
 }
@@ -340,6 +375,7 @@ async function runMarketBriefing(targetSymbol = null) {
 
 module.exports = {
   strategyPlan,
+  describeDashboardGroup,
   scanMarket,
   refreshOpenSignals,
   scanSingleSymbol,
