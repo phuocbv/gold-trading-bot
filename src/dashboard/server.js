@@ -1,4 +1,5 @@
 const fs = require('fs');
+const zlib = require('zlib');
 const express = require('express');
 const CONFIG = require('../config');
 const { loginEnabled, sessionUser, login, logout, requireAuth } = require('./auth');
@@ -12,6 +13,7 @@ const { loadBacktest } = require('../backtest/store');
 const { dbEnabled } = require('../services/db');
 const { parseDay, daySignalsFor } = require('../backtest/daySignals');
 const { dayKey } = require('../backtest/monthly');
+const { listRuns: listCryptoRuns, latestRun: latestCryptoRun } = require('../crypto/store');
 
 // Kiểm tra tín hiệu theo ngày tải dữ liệu mất vài giây: chạy lần lượt từng yêu cầu và giữ kết quả mỗi ngày trong một phút
 const DAY_CHECK_TTL_MS = 60 * 1000;
@@ -140,6 +142,41 @@ function registerDashboard(app) {
       // Phương pháp đang bật theo từng khung, để báo cáo đánh dấu đúng kể cả khi cấu hình đổi sau lần chạy báo cáo
       active: Object.fromEntries([...getStrategyPlan()].map(([tf, list]) => [tf, list.map((s) => s.key)])),
     });
+  });
+
+  // Trang backtest riêng cho BTC/ETH (dữ liệu do npm run backtest:crypto tạo), tách khỏi dashboard tín hiệu
+  app.get('/crypto-backtest', requireAuth, (req, res) => {
+    res.sendFile('crypto.html', { root: __dirname });
+  });
+
+  // Không có ?symbol: danh sách tài sản đã có kết quả. Có ?symbol=BTCUSDT: lần chạy mới nhất của tài sản đó
+  // (1-2 MB JSON nên gửi bản nén gzip, giữ sẵn theo lần chạy và trả 304 khi trình duyệt đã có)
+  const cryptoCache = new Map();
+  app.get('/api/crypto-backtest', requireAuth, async (req, res) => {
+    try {
+      const runs = await listCryptoRuns();
+      const symbol = String(req.query.symbol || '').toUpperCase();
+      if (!symbol) return res.json({ runs });
+      const head = runs.find((r) => r.symbol === symbol);
+      if (!head) return res.status(404).json({ error: `Chưa có kết quả backtest cho ${symbol} (chạy npm run backtest:crypto)` });
+      let entry = cryptoCache.get(symbol);
+      if (!entry || entry.id !== head.id) {
+        const body = Buffer.from(JSON.stringify(await latestCryptoRun(symbol)));
+        entry = { id: head.id, etag: `"crypto-${symbol}-${head.id}"`, body, gzip: zlib.gzipSync(body) };
+        cryptoCache.set(symbol, entry);
+      }
+      res.set({ ETag: entry.etag, 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' });
+      if (req.get('if-none-match') === entry.etag) return res.status(304).end();
+      res.type('application/json');
+      if (/\bgzip\b/.test(req.get('accept-encoding') || '')) {
+        res.set('Content-Encoding', 'gzip');
+        return res.send(entry.gzip);
+      }
+      return res.send(entry.body);
+    } catch (err) {
+      console.error('❌ [Dashboard] Không đọc được backtest crypto:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Các phương pháp đang bật cho tín hiệu gì trong một ngày (?date=YYYY-MM-DD, giờ VN)

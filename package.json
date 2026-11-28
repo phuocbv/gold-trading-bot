@@ -10,7 +10,8 @@
     "backtest:report": "node scripts/backtestReport.js",
     "backtest:monthly": "node scripts/backtestMonthly.js",
     "backtest:daily": "node scripts/backtestMonthly.js --days",
-    "backtest:day": "node scripts/backtestDay.js"
+    "backtest:day": "node scripts/backtestDay.js",
+    "backtest:crypto": "node scripts/backtestCrypto.js"
   },
   "engines": {
     "node": ">=20.0.0"

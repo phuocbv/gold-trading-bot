@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest BTC & ETH</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --text-1: #0b0b0b;
+    --text-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --hover: rgba(11, 11, 11, 0.04);
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #eda100;
+    --series-5: #e87ba4;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --pos-text: #006300;
+    --neg-text: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --text-1: #f0efec;
+      --text-2: #c3c2b7;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --hover: rgba(255, 255, 255, 0.04);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+      --series-5: #d55181;
+      --pos-text: #0ca30c;
+      --neg-text: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --text-1: #f0efec;
+    --text-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --hover: rgba(255, 255, 255, 0.04);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --pos-text: #0ca30c;
+    --neg-text: #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--text-1); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1320px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; justify-content: space-between; }
+  a { color: inherit; }
+  .sub, .note { color: var(--text-2); font-size: 13px; margin: 2px 0 0; }
+  .pos { color: var(--pos-text); }
+  .neg { color: var(--neg-text); }
+  .muted { color: var(--muted); }
+  [hidden] { display: none !important; }
+  .error { margin-top: 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
+  .error::before { content: "✕"; color: var(--critical); font-weight: 700; margin-right: 8px; }
+  .btn {
+    font: inherit; font-size: 14px; font-weight: 600; color: var(--text-1); text-decoration: none; cursor: pointer;
+    background: var(--hover); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; min-height: 34px; display: inline-flex; align-items: center;
+  }
+
+  .tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid var(--axis); overflow-x: auto; }
+  .tabs button {
+    font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: 8px 12px; margin-bottom: -1px; color: var(--text-2); cursor: pointer; white-space: nowrap;
+  }
+  .tabs button[aria-selected="true"] { color: var(--text-1); font-weight: 600; border-bottom-color: var(--text-1); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; margin-top: 20px; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+  select, input, .segmented button {
+    font: inherit; font-size: 14px; color: var(--text-1); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-height: 34px;
+  }
+  input[type="number"] { width: 90px; font-variant-numeric: tabular-nums; }
+  .segmented { display: inline-flex; }
+  .segmented button { cursor: pointer; border-radius: 0; color: var(--text-2); }
+  .segmented button:first-child { border-radius: 8px 0 0 8px; }
+  .segmented button:last-child { border-radius: 0 8px 8px 0; }
+  .segmented button + button { margin-left: -1px; }
+  .segmented button[aria-pressed="true"] { color: var(--text-1); font-weight: 600; background: var(--hover); }
+  .check { flex-direction: row; align-items: center; gap: 8px; min-height: 34px; font-size: 14px; color: var(--text-1); cursor: pointer; }
+  .check input { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; accent-color: var(--text-1); }
+
+  .content { transition: opacity 0.15s; }
+  .loading .content { opacity: 0.55; }
+
+  .summary { display: grid; gap: 12px; margin-top: 20px; grid-template-columns: minmax(240px, 1.3fr) repeat(3, minmax(150px, 1fr)); }
+  @media (max-width: 860px) { .summary { grid-template-columns: 1fr 1fr; } .summary .hero { grid-column: 1 / -1; } }
+  @media (max-width: 420px) { .summary { grid-template-columns: 1fr; } }
+  .tile, .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .tile { padding: 14px 16px; min-width: 0; }
+  .tile .label { font-size: 13px; color: var(--text-2); }
+  .tile .value { font-size: 28px; font-weight: 600; line-height: 1.25; margin-top: 4px; overflow-wrap: anywhere; }
+  .tile.hero .value { font-size: 40px; line-height: 1.1; }
+  .tile .detail { font-size: 13px; color: var(--text-2); margin-top: 4px; overflow-wrap: anywhere; }
+  .card { padding: 16px; margin-top: 16px; }
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 16px; margin-bottom: 12px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--text-2); align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .line-key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+  .chart svg { display: block; width: 100%; }
+  .chart .grid { stroke: var(--grid); stroke-width: 1; }
+  .chart .zero { stroke: var(--axis); stroke-width: 1; }
+  .chart .axis-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .end-label { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; }
+
+  .table-wrap { overflow: auto; max-height: 75vh; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 500; color: var(--text-2); white-space: nowrap; padding: 8px 7px;
+    position: sticky; top: 0; z-index: 1; background: var(--surface); box-shadow: inset 0 -1px 0 var(--axis);
+  }
+  td { padding: 8px 7px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  tbody tr:hover td { background: var(--hover); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .name-cell { font-weight: 500; white-space: normal; min-width: 220px; }
+  .tag { color: var(--muted); font-size: 12px; margin-left: 6px; font-weight: 400; }
+  td.rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cmp { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .cmp input { width: 16px; height: 16px; margin: 0; accent-color: var(--text-1); cursor: pointer; }
+  .cmp input:disabled { cursor: not-allowed; }
+  .bar-cell { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+  .track { position: relative; width: 90px; height: 12px; flex: none; }
+  .track::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--axis); }
+  .bar { position: absolute; top: 0; height: 12px; }
+  .bar.up { left: calc(50% + 1px); background: var(--good); border-radius: 0 4px 4px 0; }
+  .bar.down { right: 50%; background: var(--critical); border-radius: 4px 0 0 4px; }
+  .bar-value { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .pill { border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; font-size: 12px; white-space: nowrap; }
+  .pill.good { color: var(--pos-text); border-color: currentColor; }
+  .empty { color: var(--text-2); padding: 24px 0; text-align: center; }
+  .footnote { color: var(--muted); font-size: 12px; margin-top: 16px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Backtest BTC & ETH</h1>
+      <p class="sub" id="updated">Đang tải dữ liệu…</p>
+    </div>
+    <a class="btn" id="back" href="dashboard">← Thống kê tín hiệu</a>
+  </header>
+
+  <div class="error" id="error" hidden></div>
+
+  <nav class="tabs" role="tablist" aria-label="Tài sản" id="tabs"></nav>
+
+  <div class="filters" role="group" aria-label="Bộ lọc">
+    <label class="field">Khoảng thời gian
+      <select id="f-period"></select>
+    </label>
+    <label class="field">Nhóm phương pháp
+      <select id="f-group">
+        <option value="ALL">Tất cả</option>
+        <option value="trend">Xu hướng (trailing stop)</option>
+        <option value="bot">Phương pháp của bot (TP cố định)</option>
+      </select>
+    </label>
+    <label class="field">Khung
+      <select id="f-tf"></select>
+    </label>
+    <div class="field">Chiều
+      <div class="segmented" id="f-side" role="group" aria-label="Chiều lệnh">
+        <button type="button" data-side="ALL">Cả hai</button>
+        <button type="button" data-side="BUY">MUA</button>
+        <button type="button" data-side="SELL">BÁN</button>
+      </div>
+    </div>
+    <label class="field">Tối thiểu (lệnh)
+      <input type="number" id="f-min" min="1" max="500" step="1">
+    </label>
+    <label class="field check"><input type="checkbox" id="f-stable"> Chỉ phương pháp ổn định dài hạn</label>
+  </div>
+
+  <div class="content">
+    <section class="summary" aria-label="Tổng quan">
+      <div class="tile hero"><div class="label" id="t-price-label">Giá</div><div class="value" id="t-price">–</div><div class="detail" id="t-price-detail"></div></div>
+      <div class="tile"><div class="label">Phương pháp có lãi</div><div class="value" id="t-winners">–</div><div class="detail" id="t-winners-detail"></div></div>
+      <div class="tile"><div class="label">Tốt nhất (tổng R)</div><div class="value" id="t-best">–</div><div class="detail" id="t-best-detail"></div></div>
+      <div class="tile"><div class="label">Ổn định dài hạn có lãi trong khoảng</div><div class="value" id="t-stable">–</div><div class="detail" id="t-stable-detail"></div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Lãi/lỗ cộng dồn</h2>
+          <p class="note">Theo R (1R = khoảng cách Entry → SL ban đầu), đã trừ phí. Tích tối đa 5 dòng ở bảng xếp hạng để so sánh.</p>
+        </div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="chart" id="chart"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Xếp hạng phương pháp</h2>
+          <p class="note" id="rank-note"></p>
+        </div>
+        <div class="field">Xếp theo
+          <div class="segmented" id="f-sort" role="group" aria-label="Xếp theo">
+            <button type="button" data-sort="total">Tổng R</button>
+            <button type="button" data-sort="avg">R/lệnh</button>
+            <button type="button" data-sort="long">Dài hạn</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap" id="ranking"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2 id="period-title">Theo kỳ</h2>
+          <p class="note">Tổng R (số lệnh) của các dòng đang so sánh, cạnh biến động giá của tài sản.</p>
+        </div>
+      </div>
+      <div class="table-wrap" id="periods"></div>
+    </section>
+
+    <p class="footnote" id="footnote"></p>
+  </div>
+</main>
+<script>
+(() => {
+  const STORAGE_KEY = 'crypto-backtest-settings';
+  const MAX_COMPARE = 5;
+  const OOS_FROM = Date.UTC(2023, 0, 1) / 60000;
+  const token = new URLSearchParams(location.search).get('token');
+  // API nằm cùng cấp với trang, kể cả khi trang nằm sau tiền tố proxy
+  const API_BASE = location.pathname.replace(/crypto-backtest\/?$/i, '');
+  const withToken = (url, extra = '') => {
+    const params = new URLSearchParams(extra);
+    if (token) params.set('token', token);
+    const qs = params.toString();
+    return API_BASE + url + (qs ? `?${qs}` : '');
+  };
+
+  const state = {
+    runs: [],
+    data: new Map(),
+    symbol: null,
+    filters: { period: 'ytd', group: 'ALL', tf: 'ALL', side: 'ALL', min: 5, stable: false, sort: 'total' },
+    compare: null,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    if (saved.filters) Object.assign(state.filters, saved.filters);
+    if (saved.symbol) state.symbol = saved.symbol;
+  } catch (e) {}
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ filters: state.filters, symbol: state.symbol }));
+    } catch (e) {}
+  }
+
+  const $ = (sel) => document.querySelector(sel);
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') node.className = v;
+      else if (k === 'style') node.style.cssText = v;
+      else node.setAttribute(k, v === true ? '' : v);
+    }
+    for (const c of children.flat()) {
+      if (c == null || c === false) continue;
+      node.append(c instanceof Node ? c : String(c));
+    }
+    return node;
+  }
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs = {}, text) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  const sign = (v, d = 2) => (v == null || !Number.isFinite(v) ? '–' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`);
+  const signClass = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+  const pct = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(0)}%`;
+  const priceFmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+  const dateFmt = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeFmt = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const monthFmt = new Intl.DateTimeFormat('vi-VN', { timeZone: 'UTC', month: '2-digit', year: 'numeric' });
+  const sideLabel = (s) => (s === 'BUY' ? 'MUA' : 'BÁN');
+  const shortName = (name) => name.split(' (')[0];
+  const minutesOf = (tf) => {
+    const m = /^(\d+)([mhdw])$/i.exec(tf || '');
+    return m ? Number(m[1]) * { m: 1, h: 60, d: 1440, w: 10080 }[m[2].toLowerCase()] : 0;
+  };
+
+  // ---------- Thống kê ----------
+  function normCdf(x) {
+    const t = 1 / (1 + 0.2316419 * x);
+    return 1 - 0.3989423 * Math.exp(-x * x / 2) * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  }
+  // log: [phút vào lệnh, số nến giữ, R sau phí, phí theo R, còn mở]; lệnh còn mở không tính vào thống kê
+  function stats(log) {
+    const closed = log.filter((t) => !t[4]);
+    const n = closed.length;
+    const open = log.length - n;
+    if (n === 0) return { n, open };
+    let total = 0, fee = 0, gain = 0, loss = 0, wins = 0, peak = 0, dd = 0, cum = 0;
+    for (const t of closed) {
+      total += t[2];
+      fee += t[3];
+      if (t[2] > 0) { gain += t[2]; wins++; } else loss -= t[2];
+      cum += t[2];
+      peak = Math.max(peak, cum);
+      dd = Math.max(dd, peak - cum);
+    }
+    const avg = total / n;
+    let p = null;
+    if (n >= 2) {
+      const sd = Math.sqrt(closed.reduce((a, t) => a + (t[2] - avg) ** 2, 0) / (n - 1));
+      p = sd > 0 ? 2 * (1 - normCdf(Math.abs(avg / (sd / Math.sqrt(n))))) : null;
+    }
+    return { n, open, total, avg, win: wins / n, pf: loss > 0 ? gain / loss : null, dd, p, fee: fee / n };
+  }
+
+  // Ổn định dài hạn: đủ lệnh, có lãi có ý nghĩa thống kê trên toàn bộ dữ liệu và có lãi ở cả trước lẫn từ 2023
+  function longRun(series) {
+    if (series._long) return series._long;
+    const all = stats(series.log);
+    const before = stats(series.log.filter((t) => t[0] < OOS_FROM));
+    const after = stats(series.log.filter((t) => t[0] >= OOS_FROM));
+    const stable = all.n >= 30 && all.avg > 0 && all.p != null && all.p < 0.05 && before.n >= 10 && before.avg > 0 && after.n >= 10 && after.avg > 0;
+    series._long = { all, before, after, stable };
+    return series._long;
+  }
+
+  // ---------- Khoảng thời gian ----------
+  function periods(data) {
+    const nowMin = Math.floor(Date.now() / 60000);
+    const year = new Date().getUTCFullYear();
+    const y = (yy) => Date.UTC(yy, 0, 1) / 60000;
+    const first = new Date(data.daily[0][0] * 60000).getUTCFullYear();
+    const list = [
+      { value: 'ytd', label: `Năm nay (${year})`, from: y(year), to: nowMin },
+      { value: '12m', label: '12 tháng gần nhất', from: nowMin - 365 * 1440, to: nowMin },
+      { value: 'since2023', label: 'Từ 2023 đến nay', from: y(2023), to: nowMin },
+      { value: 'pre2023', label: `${first} – 2022`, from: 0, to: y(2023) },
+      { value: 'all', label: 'Toàn bộ dữ liệu', from: 0, to: nowMin },
+    ];
+    for (let yy = year - 1; yy >= first; yy--) list.push({ value: `y${yy}`, label: `Năm ${yy}`, from: y(yy), to: y(yy + 1) });
+    return list;
+  }
+  const currentPeriod = (data) => periods(data).find((p) => p.value === state.filters.period) || periods(data)[0];
+
+  // Biến động giá trong khoảng: giá đóng cửa ngày đầu / cuối và mức sụt sâu nhất từ đỉnh
+  function priceMove(data, period) {
+    const days = data.daily.filter((d) => d[0] >= period.from && d[0] < period.to);
+    if (days.length < 2) return null;
+    let peak = 0, dd = 0;
+    for (const d of days) {
+      peak = Math.max(peak, d[1]);
+      dd = Math.max(dd, 1 - d[1] / peak);
+    }
+    return { start: days[0][1], end: days[days.length - 1][1], change: days[days.length - 1][1] / days[0][1] - 1, dd, from: days[0][0], to: days[days.length - 1][0] };
+  }
+
+  // ---------- Dữ liệu ----------
+  function unauthorized() {
+    if (!token) location.assign(`${API_BASE}login`);
+    return token ? 'Sai hoặc thiếu token truy cập' : 'Phiên đăng nhập đã hết hạn, đang chuyển sang trang đăng nhập…';
+  }
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch (e) {}
+      throw new Error(res.status === 401 ? unauthorized() : msg);
+    }
+    return res.json();
+  }
+  function showError(message) {
+    const box = $('#error');
+    box.textContent = message;
+    box.hidden = !message;
+  }
+
+  async function loadSymbol(symbol) {
+    if (!state.data.has(symbol)) {
+      document.body.classList.add('loading');
+      try {
+        state.data.set(symbol, await fetchJson(withToken('api/crypto-backtest', { symbol })));
+      } finally {
+        document.body.classList.remove('loading');
+      }
+    }
+    return state.data.get(symbol);
+  }
+
+  async function selectSymbol(symbol) {
+    state.symbol = symbol;
+    state.compare = null;
+    persist();
+    renderTabs();
+    try {
+      await loadSymbol(symbol);
+      showError('');
+      render();
+    } catch (err) {
+      showError(`Không tải được kết quả ${symbol}: ${err.message}`);
+    }
+  }
+
+  // ---------- Giao diện ----------
+  function renderTabs() {
+    const host = $('#tabs');
+    host.replaceChildren(...state.runs.map((r) => {
+      const btn = el('button', { type: 'button', role: 'tab', 'aria-selected': String(r.symbol === state.symbol) }, r.displayName || r.symbol);
+      btn.addEventListener('click', () => { if (r.symbol !== state.symbol) selectSymbol(r.symbol); });
+      return btn;
+    }));
+  }
+
+  function syncSelect(select, options, value) {
+    const key = options.map((o) => o.value).join('|');
+    if (select.dataset.key !== key) {
+      select.dataset.key = key;
+      select.replaceChildren(...options.map((o) => el('option', { value: o.value }, o.label)));
+    }
+    select.value = options.some((o) => o.value === value) ? value : options[0].value;
+    return select.value;
+  }
+
+  function renderControls(data) {
+    const f = state.filters;
+    f.period = syncSelect($('#f-period'), periods(data), f.period);
+    $('#f-group').value = f.group;
+    const tfs = [...new Set(data.series.map((s) => s.timeframe))].sort((a, b) => minutesOf(a) - minutesOf(b));
+    f.tf = syncSelect($('#f-tf'), [{ value: 'ALL', label: 'Tất cả' }, ...tfs.map((t) => ({ value: t, label: t }))], f.tf);
+    for (const b of document.querySelectorAll('#f-side button')) b.setAttribute('aria-pressed', String(b.dataset.side === f.side));
+    for (const b of document.querySelectorAll('#f-sort button')) b.setAttribute('aria-pressed', String(b.dataset.sort === f.sort));
+    $('#f-min').value = f.min;
+    $('#f-stable').checked = f.stable;
+  }
+
+  // Các dòng (phương pháp × khung × chiều) theo bộ lọc, kèm thống kê trong khoảng thời gian
+  function rows(data, period) {
+    const f = state.filters;
+    const out = [];
+    for (const s of data.series) {
+      if (f.group !== 'ALL' && s.group !== f.group) continue;
+      if (f.tf !== 'ALL' && s.timeframe !== f.tf) continue;
+      if (f.side !== 'ALL' && s.side !== f.side) continue;
+      const long = longRun(s);
+      if (f.stable && !long.stable) continue;
+      const st = stats(s.log.filter((t) => t[0] >= period.from && t[0] < period.to));
+      if (st.n < f.min) continue;
+      out.push({ s, st, long });
+    }
+    const key = { total: (r) => r.st.total, avg: (r) => r.st.avg, long: (r) => (r.long.all.n ? r.long.all.avg : -Infinity) }[f.sort] || ((r) => r.st.total);
+    return out.sort((a, b) => key(b) - key(a));
+  }
+
+  function render() {
+    const data = state.data.get(state.symbol);
+    if (!data) return;
+    renderControls(data);
+    const period = currentPeriod(data);
+    const list = rows(data, period);
+
+    // Dòng so sánh: giữ lựa chọn còn trong danh sách, chưa chọn thì lấy 3 dòng ổn định dài hạn tốt nhất (hoặc 3 dòng đầu)
+    const visible = new Set(list.map((r) => r.s.id));
+    if (state.compare) state.compare = state.compare.filter((id) => visible.has(id));
+    if (!state.compare || state.compare.length === 0) {
+      const stable = list.filter((r) => r.long.stable);
+      state.compare = (stable.length ? stable : list).slice(0, 3).map((r) => r.s.id);
+    }
+
+    $('#updated').textContent = `${data.displayName} · quét lúc ${timeFmt.format(new Date(data.generatedAt))} · ${data.source} · ${data.cost} · dữ liệu tới ${dateFmt.format(new Date(data.dataTo))}`;
+    renderSummary(data, period, list);
+    renderChart(data, period, list);
+    renderRanking(data, period, list);
+    renderPeriods(data, period, list);
+    renderFootnote(data);
+  }
+
+  function renderSummary(data, period, list) {
+    const move = priceMove(data, period);
+    const coin = data.displayName.replace(/^.*\(([^/]+)\/.*$/, '$1');
+    $('#t-price-label').textContent = `Giá ${coin} trong khoảng`;
+    $('#t-price').textContent = move ? pct(move.change) : '–';
+    $('#t-price').className = `value ${move ? signClass(move.change) : ''}`;
+    $('#t-price-detail').textContent = move
+      ? `${priceFmt.format(move.start)} → ${priceFmt.format(move.end)} · sụt sâu nhất −${(move.dd * 100).toFixed(0)}% từ đỉnh`
+      : 'Không có dữ liệu giá trong khoảng này';
+
+    const winners = list.filter((r) => r.st.total > 0);
+    $('#t-winners').textContent = list.length ? `${winners.length}/${list.length}` : '–';
+    $('#t-winners-detail').textContent = `dòng có ≥ ${state.filters.min} lệnh trong khoảng`;
+
+    const best = list.slice().sort((a, b) => b.st.total - a.st.total)[0];
+    $('#t-best').textContent = best ? `${sign(best.st.total, 1)}R` : '–';
+    $('#t-best').className = `value ${best ? signClass(best.st.total) : ''}`;
+    $('#t-best-detail').textContent = best ? `${shortName(best.s.name)} ${best.s.timeframe} ${sideLabel(best.s.side)} · ${best.st.n} lệnh` : '';
+
+    const stable = list.filter((r) => r.long.stable);
+    const stableWin = stable.filter((r) => r.st.total > 0);
+    $('#t-stable').textContent = stable.length ? `${stableWin.length}/${stable.length}` : '–';
+    $('#t-stable-detail').textContent = stable.length
+      ? `tổng ${sign(stable.reduce((a, r) => a + r.st.total, 0), 1)}R nếu chạy cả ${stable.length} dòng`
+      : 'Không có dòng ổn định dài hạn trong bộ lọc';
+  }
+
+  function renderChart(data, period, list) {
+    const host = $('#chart');
+    const picked = state.compare.map((id) => list.find((r) => r.s.id === id)).filter(Boolean);
+    $('#legend').replaceChildren(...picked.map((r, k) => el('span', {},
+      el('i', { class: 'line-key', style: `background: var(--series-${k + 1})` }),
+      `${shortName(r.s.name)} ${r.s.timeframe} ${sideLabel(r.s.side)}`)));
+    if (picked.length === 0) {
+      host.replaceChildren(el('p', { class: 'empty' }, 'Không có dòng nào để vẽ.'));
+      return;
+    }
+    const lines = picked.map((r) => {
+      let cum = 0;
+      const pts = [];
+      for (const t of r.s.log) {
+        if (t[4] || t[0] < period.from || t[0] >= period.to) continue;
+        cum += t[2];
+        pts.push([t[0], cum]);
+      }
+      return pts;
+    });
+    const firstT = Math.min(...lines.map((p) => (p.length ? p[0][0] : Infinity)));
+    const x0 = period.from > 0 ? period.from : (Number.isFinite(firstT) ? firstT : data.daily[0][0]);
+    const x1 = Math.min(period.to, Math.floor(Date.now() / 60000));
+    const ys = lines.flat().map((p) => p[1]);
+    let yMin = Math.min(0, ...ys);
+    let yMax = Math.max(0, ...ys);
+    if (yMax - yMin < 1) { yMax += 0.5; yMin -= 0.5; }
+
+    const W = Math.max(320, host.clientWidth || 800);
+    const H = 280;
+    const pad = { l: 44, r: 64, t: 12, b: 26 };
+    const sx = (t) => pad.l + (W - pad.l - pad.r) * (t - x0) / Math.max(1, x1 - x0);
+    const sy = (v) => pad.t + (H - pad.t - pad.b) * (1 - (v - yMin) / (yMax - yMin));
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Lãi/lỗ cộng dồn theo R của các dòng đang so sánh' });
+
+    // Lưới ngang và nhãn trục R
+    const step = niceStep((yMax - yMin) / 4);
+    for (let v = Math.ceil(yMin / step) * step; v <= yMax + 1e-9; v += step) {
+      svg.append(svgEl('line', { class: Math.abs(v) < 1e-9 ? 'zero' : 'grid', x1: pad.l, x2: W - pad.r, y1: sy(v), y2: sy(v) }));
+      svg.append(svgEl('text', { class: 'axis-label', x: pad.l - 6, y: sy(v) + 4, 'text-anchor': 'end' }, `${v > 0 ? '+' : ''}${+v.toFixed(1)}R`));
+    }
+    // Nhãn trục thời gian: theo năm khi khoảng dài, theo tháng khi ngắn; giãn nhãn theo bề rộng để không chồng nhau
+    const spanDays = (x1 - x0) / 1440;
+    const plotW = W - pad.l - pad.r;
+    const ticks = [];
+    const d0 = new Date(x0 * 60000);
+    if (spanDays > 500) {
+      const every = Math.max(1, Math.ceil(spanDays / 365 / Math.max(1, Math.floor(plotW / 44))));
+      for (let yy = d0.getUTCFullYear() + 1; Date.UTC(yy, 0, 1) / 60000 < x1; yy += every) ticks.push([Date.UTC(yy, 0, 1) / 60000, String(yy)]);
+    } else {
+      const every = Math.max(1, Math.ceil(spanDays / 30.4 / Math.max(1, Math.floor(plotW / 64))));
+      for (let m = d0.getUTCMonth() + 1, yy = d0.getUTCFullYear(); ; m += every) {
+        const t = Date.UTC(yy, m, 1) / 60000;
+        if (t >= x1) break;
+        const at = new Date(t * 60000);
+        ticks.push([t, `${String(at.getUTCMonth() + 1).padStart(2, '0')}/${at.getUTCFullYear()}`]);
+      }
+    }
+    for (const [t, label] of ticks) svg.append(svgEl('text', { class: 'axis-label', x: sx(t), y: H - 6, 'text-anchor': 'middle' }, label));
+
+    const ends = [];
+    lines.forEach((pts, k) => {
+      if (pts.length === 0) return;
+      // Bậc thang: R chỉ đổi khi có lệnh mới
+      let d = `M${sx(x0).toFixed(1)},${sy(0).toFixed(1)}`;
+      let prev = 0;
+      for (const [t, v] of pts) {
+        d += `L${sx(t).toFixed(1)},${sy(prev).toFixed(1)}L${sx(t).toFixed(1)},${sy(v).toFixed(1)}`;
+        prev = v;
+      }
+      d += `L${sx(x1).toFixed(1)},${sy(prev).toFixed(1)}`;
+      svg.append(svgEl('path', { class: 'series', d, stroke: `var(--series-${k + 1})` }));
+      ends.push({ k, v: prev, y: sy(prev) + 4 });
+    });
+    // Nhãn cuối đường: đẩy cách nhau tối thiểu một dòng chữ để không chồng lên nhau
+    ends.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 14);
+    for (const e of ends) svg.append(svgEl('text', { class: 'end-label', x: sx(x1) + 6, y: e.y, fill: `var(--series-${e.k + 1})` }, `${sign(e.v, 1)}R`));
+    host.replaceChildren(svg);
+  }
+  function niceStep(raw) {
+    const p = 10 ** Math.floor(Math.log10(raw || 1));
+    const m = raw / p;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+  }
+
+  function renderRanking(data, period, list) {
+    const host = $('#ranking');
+    $('#rank-note').textContent = `${list.length} dòng (phương pháp × khung × chiều) có ≥ ${state.filters.min} lệnh trong khoảng · lệnh tính theo thời điểm vào lệnh`;
+    if (list.length === 0) {
+      host.replaceChildren(el('p', { class: 'empty' }, 'Không có dòng nào khớp bộ lọc. Thử giảm số lệnh tối thiểu hoặc chọn khoảng thời gian dài hơn.'));
+      return;
+    }
+    // Thang đo thanh Tổng R theo phân vị 90% để vài dòng lỗ rất nặng (vd: 15m) không làm mọi thanh khác teo lại;
+    // dòng vượt thang được vẽ hết chiều dài
+    const absTotals = list.map((r) => Math.abs(r.st.total)).sort((a, b) => a - b);
+    const maxAbs = Math.max(1, absTotals[Math.floor((absTotals.length - 1) * 0.9)]);
+    const head = el('tr', {},
+      el('th', {}, 'So sánh'), el('th', { class: 'num' }, '#'), el('th', {}, 'Phương pháp'), el('th', {}, 'Khung'), el('th', {}, 'Chiều'),
+      ...['Lệnh', 'Thắng', 'R/lệnh'].map((h) => el('th', { class: 'num' }, h)),
+      el('th', { class: 'num' }, 'Tổng R'),
+      el('th', { class: 'num', title: 'Profit factor: tổng R lãi / tổng R lỗ' }, 'PF'),
+      el('th', { class: 'num', title: 'Mức sụt sâu nhất của lãi/lỗ cộng dồn trong khoảng' }, 'Sụt max'),
+      el('th', { class: 'num', title: 'Xác suất kết quả chỉ do ngẫu nhiên (càng nhỏ càng đáng tin, < 0.05 là có ý nghĩa)' }, 'p'),
+      el('th', { class: 'num', title: 'Phí trung bình mỗi lệnh theo R (đã trừ trong các cột khác)' }, 'Phí/lệnh'),
+      el('th', { class: 'num', title: 'R/lệnh trên toàn bộ dữ liệu (số lệnh)' }, 'Dài hạn'),
+      el('th', { title: 'Ổn định: ≥ 30 lệnh, có lãi với p < 0.05 trên toàn bộ dữ liệu và có lãi cả trước lẫn từ 2023' }, 'Đánh giá'));
+    const body = list.map((r, k) => {
+      const checked = state.compare.includes(r.s.id);
+      const box = el('input', { type: 'checkbox', 'aria-label': `So sánh ${shortName(r.s.name)} ${r.s.timeframe} ${sideLabel(r.s.side)}`, checked, disabled: !checked && state.compare.length >= MAX_COMPARE });
+      box.addEventListener('change', () => {
+        state.compare = box.checked ? [...state.compare, r.s.id] : state.compare.filter((id) => id !== r.s.id);
+        render();
+      });
+      const color = checked ? el('i', { class: 'line-key', style: `background: var(--series-${state.compare.indexOf(r.s.id) + 1})` }) : null;
+      // Dòng có dữ liệu bắt đầu muộn hơn khoảng đang xem (vd: 15m chỉ có 2 năm gần nhất) thì ghi chú để không hiểu nhầm
+      const partial = Date.parse(r.s.from) / 60000 > Math.max(period.from, data.daily[0][0]) + 365 * 1440
+        ? el('span', { class: 'tag', title: 'Khoảng thời gian bắt đầu trước dữ liệu của dòng này' }, `dữ liệu từ ${dateFmt.format(new Date(r.s.from))}`) : null;
+      const w = Math.min(45, Math.abs(r.st.total) / maxAbs * 45);
+      return el('tr', {},
+        el('td', {}, el('label', { class: 'cmp' }, box, color)),
+        el('td', { class: 'num rank' }, k + 1),
+        el('td', { class: 'name-cell', title: `${r.s.name} · thoát lệnh: ${r.s.exitLabel}` }, shortName(r.s.name),
+          el('span', { class: 'tag' }, r.s.group === 'bot' ? 'bot' : 'trailing'), partial),
+        el('td', {}, r.s.timeframe),
+        el('td', {}, sideLabel(r.s.side)),
+        el('td', { class: 'num' }, r.st.n, r.st.open ? el('span', { class: 'tag', title: 'Lệnh còn mở ở cuối dữ liệu, chưa tính' }, `+${r.st.open} mở`) : null),
+        el('td', { class: 'num' }, `${Math.round(r.st.win * 100)}%`),
+        el('td', { class: `num ${signClass(r.st.avg)}` }, sign(r.st.avg)),
+        el('td', { class: 'num' }, el('div', { class: 'bar-cell' },
+          el('span', { class: 'track', 'aria-hidden': 'true' }, el('span', { class: `bar ${r.st.total >= 0 ? 'up' : 'down'}`, style: `width: ${w}px` })),
+          el('span', { class: `bar-value ${signClass(r.st.total)}` }, sign(r.st.total, 1)))),
+        el('td', { class: 'num' }, r.st.pf == null ? '–' : r.st.pf.toFixed(2)),
+        el('td', { class: 'num' }, `${r.st.dd.toFixed(1)}R`),
+        el('td', { class: 'num' }, r.st.p == null ? '–' : r.st.p < 0.001 ? '<0.001' : r.st.p.toFixed(3)),
+        el('td', { class: 'num muted' }, `−${r.st.fee.toFixed(2)}`),
+        el('td', { class: `num ${signClass(r.long.all.avg)}` }, r.long.all.n ? `${sign(r.long.all.avg)} (${r.long.all.n})` : '–'),
+        el('td', {}, r.long.stable ? el('span', { class: 'pill good' }, 'Ổn định')
+          : el('span', { class: 'muted' }, r.long.all.n && r.long.all.avg > 0 ? 'Có lãi, chưa chắc' : 'Lỗ dài hạn')));
+    });
+    host.replaceChildren(el('table', {}, el('thead', {}, head), el('tbody', {}, body)));
+  }
+
+  // Theo năm (khoảng dài) hoặc theo tháng (khoảng ≤ khoảng 13 tháng)
+  function renderPeriods(data, period, list) {
+    const host = $('#periods');
+    const picked = state.compare.map((id) => list.find((r) => r.s.id === id)).filter(Boolean);
+    const nowMin = Math.floor(Date.now() / 60000);
+    const start = period.from > 0 ? period.from : data.daily[0][0];
+    const end = Math.min(period.to, nowMin);
+    const monthly = end - start <= 400 * 1440;
+    $('#period-title').textContent = monthly ? 'Theo tháng' : 'Theo năm';
+    const buckets = [];
+    const d = new Date(start * 60000);
+    if (monthly) {
+      for (let yy = d.getUTCFullYear(), m = d.getUTCMonth(); ; m++) {
+        const from = Date.UTC(yy, m, 1) / 60000;
+        if (from >= end) break;
+        buckets.push({ label: monthFmt.format(new Date(from * 60000)), from: Math.max(from, start), to: Math.min(Date.UTC(yy, m + 1, 1) / 60000, end) });
+      }
+    } else {
+      for (let yy = d.getUTCFullYear(); Date.UTC(yy, 0, 1) / 60000 < end; yy++) {
+        buckets.push({ label: String(yy), from: Math.max(Date.UTC(yy, 0, 1) / 60000, start), to: Math.min(Date.UTC(yy + 1, 0, 1) / 60000, end) });
+      }
+    }
+    if (picked.length === 0 || buckets.length === 0) {
+      host.replaceChildren(el('p', { class: 'empty' }, 'Tích ít nhất một dòng ở bảng xếp hạng để xem theo kỳ.'));
+      return;
+    }
+    const head = el('tr', {}, el('th', {}, 'Kỳ'), el('th', { class: 'num' }, 'Giá tài sản'),
+      ...picked.map((r, k) => el('th', { class: 'num' }, el('i', { class: 'line-key', style: `background: var(--series-${k + 1}); margin-right: 6px` }),
+        `${shortName(r.s.name)} ${r.s.timeframe} ${sideLabel(r.s.side)}`)));
+    const body = buckets.slice().reverse().map((b) => {
+      const move = priceMove(data, b);
+      return el('tr', {},
+        el('td', {}, b.label),
+        el('td', { class: `num ${move ? signClass(move.change) : ''}` }, move ? pct(move.change) : '–'),
+        ...picked.map((r) => {
+          const st = stats(r.s.log.filter((t) => t[0] >= b.from && t[0] < b.to));
+          return el('td', { class: `num ${st.n ? signClass(st.total) : 'muted'}` }, st.n ? `${sign(st.total, 1)}R (${st.n})` : '–');
+        }));
+    });
+    host.replaceChildren(el('table', {}, el('thead', {}, head), el('tbody', {}, body)));
+  }
+
+  function renderFootnote(data) {
+    const tfs = Object.entries(data.timeframes || {}).sort((a, b) => minutesOf(a[0]) - minutesOf(b[0]))
+      .map(([tf, v]) => `${tf} từ ${dateFmt.format(new Date(v.from))}`).join(', ');
+    $('#footnote').textContent =
+      `Cách tính: dữ liệu ${data.source} (${tfs}). Mọi kết quả đã trừ ${data.cost}, chưa tính trượt giá và funding. ` +
+      'Nhóm xu hướng: vào lệnh ở giá đóng cửa nến tín hiệu, mỗi lúc một lệnh, SL ban đầu 2 ATR rồi dời theo giá tốt nhất ± 3 ATR (trailing), không đặt TP; ' +
+      'TSMOM và giá cắt SMA50 thoát khi tín hiệu đổi chiều. ' +
+      `Phương pháp của bot: chạy riêng từng phương pháp bằng engine backtest của bot, SL/TP của phương pháp, tối đa ${data.horizonBars} nến. ` +
+      'R = lãi/lỗ chia cho khoảng cách Entry → SL ban đầu. Lệnh còn mở ở cuối dữ liệu không được tính. ' +
+      '"Ổn định" chỉ dựa trên toàn bộ dữ liệu, không theo khoảng đang xem: kết quả tốt trong một khoảng ngắn có thể chỉ do thị trường lúc đó. ' +
+      'Chạy lại bằng npm run backtest:crypto.';
+  }
+
+  // ---------- Sự kiện ----------
+  function bind() {
+    const set = (patch) => {
+      Object.assign(state.filters, patch);
+      persist();
+      render();
+    };
+    $('#f-period').addEventListener('change', (e) => set({ period: e.target.value }));
+    $('#f-group').addEventListener('change', (e) => set({ group: e.target.value }));
+    $('#f-tf').addEventListener('change', (e) => set({ tf: e.target.value }));
+    $('#f-min').addEventListener('change', (e) => set({ min: Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 1)) }));
+    $('#f-stable').addEventListener('change', (e) => set({ stable: e.target.checked }));
+    for (const b of document.querySelectorAll('#f-side button')) b.addEventListener('click', () => set({ side: b.dataset.side }));
+    for (const b of document.querySelectorAll('#f-sort button')) b.addEventListener('click', () => set({ sort: b.dataset.sort }));
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const data = state.data.get(state.symbol);
+        if (data) renderChart(data, currentPeriod(data), rows(data, currentPeriod(data)));
+      }, 150);
+    });
+  }
+
+  async function start() {
+    $('#back').href = withToken('dashboard');
+    bind();
+    try {
+      state.runs = (await fetchJson(withToken('api/crypto-backtest'))).runs || [];
+    } catch (err) {
+      showError(`Không tải được danh sách kết quả: ${err.message}`);
+      $('#updated').textContent = 'Chưa có dữ liệu';
+      return;
+    }
+    if (state.runs.length === 0) {
+      $('#updated').textContent = 'Chưa có kết quả backtest crypto';
+      showError('Chưa có kết quả: chạy npm run backtest:crypto để quét BTC/ETH rồi tải lại trang.');
+      return;
+    }
+    // Thứ tự cố định: BTC trước ETH, rồi theo tên
+    const rank = (s) => ({ BTCUSDT: 0, ETHUSDT: 1 }[s] ?? 2);
+    state.runs.sort((a, b) => rank(a.symbol) - rank(b.symbol) || a.symbol.localeCompare(b.symbol));
+    const symbol = state.runs.some((r) => r.symbol === state.symbol) ? state.symbol : state.runs[0].symbol;
+    await selectSymbol(symbol);
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>
